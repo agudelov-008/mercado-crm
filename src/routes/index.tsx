@@ -69,14 +69,14 @@ function Dashboard() {
             <p className="text-xs text-muted-foreground mt-0.5">Items requiring attention</p>
             <div className="mt-4 space-y-2">
               {[
-                { label: "KYC refresh due", count: 3, tone: "warning" },
-                { label: "Risk profiles expiring", count: 2, tone: "destructive" },
-                { label: "Quarterly reports queued", count: 8, tone: "info" },
-                { label: "Rebalancing proposals", count: 5, tone: "success" },
+                { label: "KYC refresh due", count: 3, tone: "bg-warning/15 text-warning" },
+                { label: "Risk profiles expiring", count: 2, tone: "bg-destructive/15 text-destructive" },
+                { label: "Quarterly reports queued", count: 8, tone: "bg-info/15 text-info" },
+                { label: "Rebalancing proposals", count: 5, tone: "bg-success/15 text-success" },
               ].map((it) => (
                 <div key={it.label} className="flex items-center justify-between p-2.5 rounded-md bg-surface-elevated border border-border">
                   <span className="text-xs">{it.label}</span>
-                  <span className={`text-xs font-semibold tabular-nums px-2 py-0.5 rounded bg-${it.tone}/15 text-${it.tone}`}>{it.count}</span>
+                  <span className={`text-xs font-semibold tabular-nums px-2 py-0.5 rounded ${it.tone}`}>{it.count}</span>
                 </div>
               ))}
             </div>
