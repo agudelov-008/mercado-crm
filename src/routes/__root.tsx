@@ -4,10 +4,12 @@ import {
   createRootRouteWithContext,
   HeadContent,
   Scripts,
+  useRouterState,
 } from "@tanstack/react-router";
 
 import appCss from "../styles.css?url";
 import { AppProvider } from "@/lib/app-context";
+import { AuthGate, AuthProvider } from "@/lib/auth-context";
 import { AppShell } from "@/components/AppShell";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -19,7 +21,13 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { title: "Quant Capital — Wealth CRM" },
       { name: "description", content: "Premium CRM for stock market & wealth management professionals." },
     ],
-    links: [{ rel: "stylesheet", href: appCss }],
+    links: [
+      { rel: "stylesheet", href: appCss },
+      {
+        rel: "icon",
+        href: "data:image/svg+xml,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><text y=\".9em\" font-size=\"90\">🐂</text></svg>",
+      },
+    ],
   }),
   shellComponent: RootShell,
   component: RootComponent,
@@ -39,14 +47,26 @@ function RootShell({ children }: { children: React.ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  const isLoginRoute = useRouterState({
+    select: (state) => state.location.pathname === "/login",
+  });
+
   return (
     <QueryClientProvider client={queryClient}>
-      <AppProvider>
-        <AppShell>
-          <Outlet />
-        </AppShell>
-        <Toaster theme="dark" />
-      </AppProvider>
+      <AuthProvider queryClient={queryClient}>
+        <AuthGate>
+          <AppProvider>
+            {isLoginRoute ? (
+              <Outlet />
+            ) : (
+              <AppShell>
+                <Outlet />
+              </AppShell>
+            )}
+            <Toaster theme="dark" />
+          </AppProvider>
+        </AuthGate>
+      </AuthProvider>
     </QueryClientProvider>
   );
 }

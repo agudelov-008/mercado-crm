@@ -1,5 +1,6 @@
-import { Bell, Search, ChevronDown, Check } from "lucide-react";
+import { Bell, Search, ChevronDown, Check, LogOut } from "lucide-react";
 import { useApp, type Role } from "@/lib/app-context";
+import { useAuth } from "@/lib/auth-context";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuLabel, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
@@ -7,6 +8,7 @@ import { Input } from "@/components/ui/input";
 
 export function Topbar() {
   const { role, setRole, currentUser } = useApp();
+  const { handleLogout } = useAuth();
   return (
     <header className="h-16 border-b border-border bg-surface/60 backdrop-blur flex items-center px-6 gap-4">
       <div className="relative flex-1 max-w-md">
@@ -46,15 +48,26 @@ export function Topbar() {
           <span className="absolute top-2 right-2 h-1.5 w-1.5 rounded-full bg-success" />
         </button>
 
-        <div className="flex items-center gap-2 pl-3 border-l border-border">
-          <div className="h-8 w-8 rounded-full bg-gradient-primary flex items-center justify-center text-xs font-semibold text-primary-foreground">
-            {currentUser.initials}
-          </div>
-          <div className="leading-tight hidden sm:block">
-            <div className="text-sm font-medium">{currentUser.name}</div>
-            <div className="text-[10px] text-muted-foreground">{role}</div>
-          </div>
-        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger className="flex items-center gap-2 pl-3 border-l border-border outline-none">
+            <div className="h-8 w-8 rounded-full bg-gradient-primary flex items-center justify-center text-xs font-semibold text-primary-foreground">
+              {currentUser.initials}
+            </div>
+            <div className="leading-tight hidden sm:block text-left">
+              <div className="text-sm font-medium">{currentUser.name}</div>
+              <div className="text-[10px] text-muted-foreground">{role}</div>
+            </div>
+            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground hidden sm:block" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuLabel className="truncate">{currentUser.email}</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => void handleLogout()}>
+              <LogOut className="h-4 w-4" />
+              Cerrar sesión
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </header>
   );

@@ -11,6 +11,8 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as UsersRouteImport } from './routes/users'
 import { Route as TasksRouteImport } from './routes/tasks'
+import { Route as LoginRouteImport } from './routes/login'
+import { Route as AffiliatesRouteImport } from './routes/affiliates'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ClientsIndexRouteImport } from './routes/clients.index'
 import { Route as ClientsIdRouteImport } from './routes/clients.$id'
@@ -23,6 +25,16 @@ const UsersRoute = UsersRouteImport.update({
 const TasksRoute = TasksRouteImport.update({
   id: '/tasks',
   path: '/tasks',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AffiliatesRoute = AffiliatesRouteImport.update({
+  id: '/affiliates',
+  path: '/affiliates',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -43,6 +55,8 @@ const ClientsIdRoute = ClientsIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/affiliates': typeof AffiliatesRoute
+  '/login': typeof LoginRoute
   '/tasks': typeof TasksRoute
   '/users': typeof UsersRoute
   '/clients/$id': typeof ClientsIdRoute
@@ -50,6 +64,8 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/affiliates': typeof AffiliatesRoute
+  '/login': typeof LoginRoute
   '/tasks': typeof TasksRoute
   '/users': typeof UsersRoute
   '/clients/$id': typeof ClientsIdRoute
@@ -58,6 +74,8 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/affiliates': typeof AffiliatesRoute
+  '/login': typeof LoginRoute
   '/tasks': typeof TasksRoute
   '/users': typeof UsersRoute
   '/clients/$id': typeof ClientsIdRoute
@@ -65,14 +83,38 @@ export interface FileRoutesById {
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/tasks' | '/users' | '/clients/$id' | '/clients/'
+  fullPaths:
+    | '/'
+    | '/affiliates'
+    | '/login'
+    | '/tasks'
+    | '/users'
+    | '/clients/$id'
+    | '/clients/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/tasks' | '/users' | '/clients/$id' | '/clients'
-  id: '__root__' | '/' | '/tasks' | '/users' | '/clients/$id' | '/clients/'
+  to:
+    | '/'
+    | '/affiliates'
+    | '/login'
+    | '/tasks'
+    | '/users'
+    | '/clients/$id'
+    | '/clients'
+  id:
+    | '__root__'
+    | '/'
+    | '/affiliates'
+    | '/login'
+    | '/tasks'
+    | '/users'
+    | '/clients/$id'
+    | '/clients/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AffiliatesRoute: typeof AffiliatesRoute
+  LoginRoute: typeof LoginRoute
   TasksRoute: typeof TasksRoute
   UsersRoute: typeof UsersRoute
   ClientsIdRoute: typeof ClientsIdRoute
@@ -93,6 +135,20 @@ declare module '@tanstack/react-router' {
       path: '/tasks'
       fullPath: '/tasks'
       preLoaderRoute: typeof TasksRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/affiliates': {
+      id: '/affiliates'
+      path: '/affiliates'
+      fullPath: '/affiliates'
+      preLoaderRoute: typeof AffiliatesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -121,6 +177,8 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AffiliatesRoute: AffiliatesRoute,
+  LoginRoute: LoginRoute,
   TasksRoute: TasksRoute,
   UsersRoute: UsersRoute,
   ClientsIdRoute: ClientsIdRoute,
@@ -129,3 +187,13 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}

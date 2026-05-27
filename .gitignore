@@ -8,6 +8,7 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+.env
 dist
 dist-ssr
 .output
@@ -23,6 +24,7 @@ dist-ssr
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
+.cursorrules
 .idea
 .DS_Store
 *.suo
