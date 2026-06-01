@@ -1,188 +1,599 @@
-import { useState } from "react";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Shield, Plus, Mail, Briefcase, MoreHorizontal, Lock } from "lucide-react";
-import { agents as seed, formatCurrency, type Agent } from "@/lib/mock-data";
+import { useState, type FormEvent } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import {
+  Briefcase,
+  Loader2,
+  Lock,
+  Mail,
+  Pencil,
+  Plus,
+  Shield,
+  Trash2,
+  User,
+  Users,
+} from "lucide-react";
+import { toast } from "sonner";
 import { useApp } from "@/lib/app-context";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import {
+  countClientsByOwnerIds,
+  createAgentWithUser,
+  deleteAgentProfile,
+  fetchAgentProfiles,
+  updateAgentProfile,
+  type AgentFormInput,
+  type AgentUpdateInput,
+  type TeamProfile,
+} from "@/lib/user-management";
+import { AgentPortfolioModal } from "@/components/AgentPortfolioModal";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox";
-import { toast } from "sonner";
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/users")({ component: UsersPage });
 
-const permList = [
-  "View all clients",
-  "Edit client portfolios",
-  "Send messages",
-  "Approve trades > $100K",
-  "Manage compliance docs",
-  "View analytics",
-];
+const AGENTS_QUERY_KEY = ["team-agents"] as const;
+
+const EMPTY_CREATE: AgentFormInput = {
+  firstName: "",
+  lastName: "",
+  email: "",
+  password: "",
+};
+
+function profileName(row: TeamProfile): string {
+  const name = [row.first_name, row.last_name].filter(Boolean).join(" ").trim();
+  return name || row.email;
+}
+
+function profileInitials(row: TeamProfile): string {
+  return profileName(row)
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("") || "?";
+}
+
+function agentToUpdateForm(agent: TeamProfile): AgentUpdateInput {
+  return {
+    firstName: agent.first_name?.trim() ?? "",
+    lastName: agent.last_name?.trim() ?? "",
+    email: agent.email,
+    password: "",
+  };
+}
+
+async function fetchAgentsWithCounts(): Promise<
+  Array<TeamProfile & { clientCount: number }>
+> {
+  const agents = await fetchAgentProfiles();
+  const counts = await countClientsByOwnerIds(agents.map((a) => a.id));
+  return agents.map((agent) => ({
+    ...agent,
+    clientCount: counts.get(agent.id) ?? 0,
+  }));
+}
+
+function AccessDenied() {
+  return (
+    <div className="p-8 max-w-md mx-auto mt-20 text-center">
+      <Lock className="h-10 w-10 mx-auto text-muted-foreground" />
+      <h2 className="text-xl font-semibold mt-4">Acceso restringido</h2>
+      <p className="text-sm text-muted-foreground mt-2">
+        La gestión de usuarios está reservada para administradores del sistema.
+      </p>
+      <Button className="mt-4" asChild>
+        <Link to="/">Volver al Dashboard</Link>
+      </Button>
+    </div>
+  );
+}
 
 function UsersPage() {
-  const { role } = useApp();
-  const navigate = useNavigate();
-  const [agents, setAgents] = useState<Agent[]>(seed);
-  const [open, setOpen] = useState(false);
-  const [editAgent, setEditAgent] = useState<Agent | null>(null);
-  const [perms, setPerms] = useState<Record<string, boolean>>({});
+  const { profileRole } = useApp();
 
-  if (role !== "Administrator") {
+  if (profileRole === null) {
     return (
-      <div className="p-8 max-w-md mx-auto mt-20 text-center">
-        <Lock className="h-10 w-10 mx-auto text-muted-foreground" />
-        <h2 className="text-xl font-semibold mt-4">Administrator access required</h2>
-        <p className="text-sm text-muted-foreground mt-2">Switch role from the top bar to preview this view.</p>
-        <Button className="mt-4" onClick={() => navigate({ to: "/" })}>Back to Dashboard</Button>
+      <div className="flex items-center justify-center min-h-[40vh] text-muted-foreground">
+        <Loader2 className="h-6 w-6 animate-spin" />
       </div>
     );
   }
 
+  if (profileRole !== "Admin") {
+    return <AccessDenied />;
+  }
+
+  return <UsersCrud />;
+}
+
+function UsersCrud() {
+  const queryClient = useQueryClient();
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createForm, setCreateForm] = useState<AgentFormInput>(EMPTY_CREATE);
+  const [editAgent, setEditAgent] = useState<TeamProfile | null>(null);
+  const [editForm, setEditForm] = useState<AgentUpdateInput>({
+    firstName: "",
+    lastName: "",
+    email: "",
+    password: "",
+  });
+  const [deleteTarget, setDeleteTarget] = useState<TeamProfile | null>(null);
+  const [portfolioAgent, setPortfolioAgent] = useState<TeamProfile | null>(null);
+
+  const { data: agents = [], isLoading, isError, error } = useQuery({
+    queryKey: AGENTS_QUERY_KEY,
+    queryFn: fetchAgentsWithCounts,
+    staleTime: 30_000,
+  });
+
+  const invalidateAgentQueries = () => {
+    void queryClient.invalidateQueries({ queryKey: AGENTS_QUERY_KEY });
+    void queryClient.invalidateQueries({ queryKey: ["agent-profiles-owner"] });
+    void queryClient.invalidateQueries({ queryKey: ["agent-profiles-manual"] });
+    void queryClient.invalidateQueries({ queryKey: ["agent-profiles-bulk-assign"] });
+    void queryClient.invalidateQueries({ queryKey: ["secure-clients"] });
+  };
+
+  const createMutation = useMutation({
+    mutationFn: () => createAgentWithUser(createForm),
+    onSuccess: () => {
+      toast.success("Asesor y cuenta de acceso creados correctamente.");
+      setCreateForm(EMPTY_CREATE);
+      setCreateOpen(false);
+      invalidateAgentQueries();
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Error al crear el asesor.");
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: () => {
+      if (!editAgent) throw new Error("No hay asesor seleccionado.");
+      return updateAgentProfile(editAgent.id, editForm);
+    },
+    onSuccess: () => {
+      toast.success("Asesor actualizado correctamente.");
+      setEditAgent(null);
+      invalidateAgentQueries();
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Error al actualizar el asesor.");
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (agentId: string) => deleteAgentProfile(agentId),
+    onSuccess: () => {
+      toast.success("Asesor eliminado correctamente.");
+      setDeleteTarget(null);
+      invalidateAgentQueries();
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Error al eliminar el asesor.");
+    },
+  });
+
+  const isSaving =
+    createMutation.isPending || updateMutation.isPending || deleteMutation.isPending;
+
+  const updateCreateField = <K extends keyof AgentFormInput>(
+    key: K,
+    value: AgentFormInput[K],
+  ) => {
+    setCreateForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const updateEditField = <K extends keyof AgentUpdateInput>(
+    key: K,
+    value: AgentUpdateInput[K],
+  ) => {
+    setEditForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const isCreateValid =
+    createForm.firstName.trim() !== "" &&
+    createForm.email.trim() !== "" &&
+    createForm.password.length >= 8;
+
+  const isEditValid =
+    editForm.firstName.trim() !== "" && editForm.email.trim() !== "";
+
+  const openEdit = (agent: TeamProfile) => {
+    setEditAgent(agent);
+    setEditForm(agentToUpdateForm(agent));
+  };
+
+  const handleCreateSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    createMutation.mutate();
+  };
+
+  const handleEditSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    updateMutation.mutate();
+  };
+
   return (
-    <div className="p-6 lg:p-8 space-y-6 max-w-[1400px] mx-auto">
+    <div className="p-6 lg:p-8 space-y-6 max-w-[1400px] mx-auto relative">
+      {isSaving && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/60 backdrop-blur-sm pointer-events-none">
+          <div className="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-3 shadow-elegant">
+            <Loader2 className="h-5 w-5 animate-spin text-primary" />
+            <span className="text-sm text-muted-foreground">Guardando cambios…</span>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-end justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-2xl font-semibold flex items-center gap-2"><Shield className="h-5 w-5 text-primary" /> User Management</h1>
-          <p className="text-sm text-muted-foreground">{agents.length} team members · {agents.filter(a => a.status === "Active").length} active</p>
+          <h1 className="text-2xl font-semibold flex items-center gap-2">
+            <Shield className="h-5 w-5 text-primary" />
+            User Management
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            {isLoading
+              ? "Cargando asesores…"
+              : `${agents.length} asesor${agents.length === 1 ? "" : "es"} · rol Agent`}
+          </p>
         </div>
-        <button onClick={() => setOpen(true)} className="h-10 px-4 rounded-md bg-gradient-primary text-primary-foreground text-sm font-medium flex items-center gap-2 shadow-glow">
-          <Plus className="h-4 w-4" /> Add New Agent
-        </button>
+        <Button
+          type="button"
+          onClick={() => {
+            setCreateForm(EMPTY_CREATE);
+            setCreateOpen(true);
+          }}
+          className="h-10 px-4 bg-gradient-primary text-primary-foreground shadow-glow"
+          disabled={isSaving}
+        >
+          <Plus className="h-4 w-4 mr-2" />
+          Agregar Asesor
+        </Button>
       </div>
 
       <div className="rounded-xl border border-border bg-card/40 overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-surface-elevated/60 text-xs uppercase tracking-wider text-muted-foreground">
-            <tr>
-              <th className="text-left px-4 py-3 font-medium">Agent</th>
-              <th className="text-left px-4 py-3 font-medium">Role</th>
-              <th className="text-right px-4 py-3 font-medium">Clients</th>
-              <th className="text-right px-4 py-3 font-medium">AUM</th>
-              <th className="text-left px-4 py-3 font-medium">Status</th>
-              <th className="text-right px-4 py-3 font-medium">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {agents.map(a => (
-              <tr key={a.id} className="border-t border-border hover:bg-surface-elevated/40 transition-colors">
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-3">
-                    <div className="h-9 w-9 rounded-full bg-gradient-primary flex items-center justify-center text-xs font-semibold text-primary-foreground">
-                      {a.name.split(" ").map(n => n[0]).join("")}
-                    </div>
-                    <div>
-                      <div className="font-medium">{a.name}</div>
-                      <div className="text-xs text-muted-foreground flex items-center gap-1"><Mail className="h-3 w-3" />{a.email}</div>
-                    </div>
-                  </div>
-                </td>
-                <td className="px-4 py-3">
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded border ${a.role === "Administrator" ? "bg-warning/15 text-warning border-warning/30" : "bg-info/15 text-info border-info/30"}`}>{a.role}</span>
-                </td>
-                <td className="px-4 py-3 text-right tabular-nums">{a.clients}</td>
-                <td className="px-4 py-3 text-right tabular-nums font-medium">{formatCurrency(a.aum)}</td>
-                <td className="px-4 py-3">
-                  <span className={`flex items-center gap-1.5 text-xs ${a.status === "Active" ? "text-success" : "text-muted-foreground"}`}>
-                    <span className={`h-1.5 w-1.5 rounded-full ${a.status === "Active" ? "bg-success animate-pulse-dot" : "bg-muted-foreground"}`} />
-                    {a.status}
-                  </span>
-                </td>
-                <td className="px-4 py-3">
-                  <div className="flex justify-end gap-2">
-                    <button onClick={() => { setEditAgent(a); setPerms(Object.fromEntries(permList.map(p => [p, Math.random() > 0.3]))); }} className="text-xs px-2.5 py-1 rounded-md border border-border hover:border-primary/40 hover:text-primary transition-colors">Edit permissions</button>
-                    <button className="h-7 w-7 rounded-md hover:bg-surface-elevated flex items-center justify-center"><MoreHorizontal className="h-4 w-4" /></button>
-                  </div>
-                </td>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-surface-elevated/60 text-xs uppercase tracking-wider text-muted-foreground">
+              <tr>
+                <th className="text-left px-4 py-3 font-medium">Asesor</th>
+                <th className="text-left px-4 py-3 font-medium">Rol</th>
+                <th className="text-right px-4 py-3 font-medium">Clientes</th>
+                <th className="text-left px-4 py-3 font-medium">Correo</th>
+                <th className="text-right px-4 py-3 font-medium min-w-[280px]">Acciones</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {isLoading && (
+                <tr>
+                  <td colSpan={5} className="px-4 py-12 text-center text-muted-foreground">
+                    <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
+                    Cargando datos desde Supabase…
+                  </td>
+                </tr>
+              )}
+              {isError && !isLoading && (
+                <tr>
+                  <td colSpan={5} className="px-4 py-8 text-center text-destructive">
+                    {error instanceof Error ? error.message : "Error al cargar asesores."}
+                  </td>
+                </tr>
+              )}
+              {!isLoading && !isError && agents.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
+                    No hay asesores registrados. Crea el primero con el botón superior.
+                  </td>
+                </tr>
+              )}
+              {!isLoading &&
+                !isError &&
+                agents.map((agent) => (
+                  <tr
+                    key={agent.id}
+                    className="border-t border-border hover:bg-surface-elevated/40 transition-colors"
+                  >
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <div className="h-9 w-9 rounded-full bg-gradient-primary flex items-center justify-center text-xs font-semibold text-primary-foreground">
+                          {profileInitials(agent)}
+                        </div>
+                        <div className="font-medium">{profileName(agent)}</div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="text-[10px] px-1.5 py-0.5 rounded border bg-info/15 text-info border-info/30">
+                        Agent
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums font-medium">
+                      {agent.clientCount}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="text-xs text-muted-foreground flex items-center gap-1">
+                        <Mail className="h-3 w-3 shrink-0" />
+                        {agent.email}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex justify-end flex-wrap gap-1.5">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-8 text-xs border-primary/30"
+                          disabled={isSaving}
+                          onClick={() => setPortfolioAgent(agent)}
+                        >
+                          <Users className="h-3.5 w-3.5" />
+                          Gestionar cartera
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-8 w-8 p-0"
+                          disabled={isSaving}
+                          onClick={() => openEdit(agent)}
+                          aria-label={`Editar ${profileName(agent)}`}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-8 w-8 p-0 border-destructive/30 text-destructive hover:bg-destructive/10"
+                          disabled={isSaving}
+                          onClick={() => setDeleteTarget(agent)}
+                          aria-label={`Eliminar ${profileName(agent)}`}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
-      {/* Add agent modal */}
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="max-w-lg bg-card border-border">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><Briefcase className="h-4 w-4 text-primary" /> Add New Agent</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              <Briefcase className="h-4 w-4 text-primary" />
+              Nuevo Asesor (Agent)
+            </DialogTitle>
           </DialogHeader>
-          <form onSubmit={(e) => { e.preventDefault(); const form = new FormData(e.currentTarget as HTMLFormElement); const name = String(form.get("name") || ""); const email = String(form.get("email") || ""); const role = String(form.get("role") || "Agent") as Agent["role"]; setAgents(a => [...a, { id: `a${a.length + 1}`, name, email, role, clients: 0, aum: 0, status: "Active" }]); toast.success(`${name} added to the team`); setOpen(false); }} className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="name">Full name</Label>
-                <Input id="name" name="name" required placeholder="e.g. Andrea Velasco" className="bg-surface-elevated border-border" />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="email">Work email</Label>
-                <Input id="email" name="email" required type="email" placeholder="andrea@quantcapital.io" className="bg-surface-elevated border-border" />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>Role</Label>
-                <Select name="role" defaultValue="Agent">
-                  <SelectTrigger className="bg-surface-elevated border-border"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Agent">Agent</SelectItem>
-                    <SelectItem value="Administrator">Administrator</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label>Specialization</Label>
-                <Select defaultValue="equities">
-                  <SelectTrigger className="bg-surface-elevated border-border"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="equities">Equities</SelectItem>
-                    <SelectItem value="fixed">Fixed Income</SelectItem>
-                    <SelectItem value="alt">Alternatives</SelectItem>
-                    <SelectItem value="wealth">Wealth Planning</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label>Default permissions</Label>
-              <div className="rounded-md border border-border bg-surface-elevated p-3 space-y-2">
-                {permList.slice(0, 4).map(p => (
-                  <label key={p} className="flex items-center gap-2 text-xs cursor-pointer">
-                    <Checkbox defaultChecked={p !== "Approve trades > $100K"} /> {p}
-                  </label>
-                ))}
-              </div>
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-              <Button type="submit" className="bg-gradient-primary shadow-glow">Create agent</Button>
+          <form onSubmit={handleCreateSubmit} className="space-y-4">
+            <AgentFormFields
+              firstName={createForm.firstName}
+              lastName={createForm.lastName}
+              email={createForm.email}
+              password={createForm.password}
+              onFirstName={(v) => updateCreateField("firstName", v)}
+              onLastName={(v) => updateCreateField("lastName", v)}
+              onEmail={(v) => updateCreateField("email", v)}
+              onPassword={(v) => updateCreateField("password", v)}
+              passwordRequired
+            />
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>
+                Cancelar
+              </Button>
+              <Button
+                type="submit"
+                disabled={createMutation.isPending || !isCreateValid}
+                className={cn("bg-gradient-primary shadow-glow")}
+              >
+                {createMutation.isPending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Creando…
+                  </>
+                ) : (
+                  <>
+                    <User className="h-4 w-4" />
+                    Crear asesor
+                  </>
+                )}
+              </Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
 
-      {/* Edit permissions modal */}
       <Dialog open={!!editAgent} onOpenChange={(o) => !o && setEditAgent(null)}>
-        <DialogContent className="max-w-md bg-card border-border">
+        <DialogContent className="max-w-lg bg-card border-border">
           <DialogHeader>
-            <DialogTitle>Permissions · {editAgent?.name}</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="h-4 w-4 text-primary" />
+              Editar asesor
+            </DialogTitle>
           </DialogHeader>
-          <div className="space-y-2 rounded-md border border-border bg-surface-elevated p-3">
-            {permList.map(p => (
-              <label key={p} className="flex items-center justify-between gap-2 text-sm cursor-pointer py-1">
-                <span>{p}</span>
-                <Checkbox checked={!!perms[p]} onCheckedChange={(v) => setPerms(prev => ({ ...prev, [p]: !!v }))} />
-              </label>
-            ))}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditAgent(null)}>Cancel</Button>
-            <Button className="bg-gradient-primary shadow-glow" onClick={() => { toast.success(`Permissions updated for ${editAgent?.name}`); setEditAgent(null); }}>Save changes</Button>
-          </DialogFooter>
+          <form onSubmit={handleEditSubmit} className="space-y-4">
+            <AgentFormFields
+              firstName={editForm.firstName}
+              lastName={editForm.lastName}
+              email={editForm.email}
+              password={editForm.password}
+              onFirstName={(v) => updateEditField("firstName", v)}
+              onLastName={(v) => updateEditField("lastName", v)}
+              onEmail={(v) => updateEditField("email", v)}
+              onPassword={(v) => updateEditField("password", v)}
+              passwordRequired={false}
+              passwordHint="Dejar vacío para no cambiar la contraseña."
+            />
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button type="button" variant="outline" onClick={() => setEditAgent(null)}>
+                Cancelar
+              </Button>
+              <Button
+                type="submit"
+                disabled={updateMutation.isPending || !isEditValid}
+                className="bg-gradient-primary shadow-glow"
+              >
+                {updateMutation.isPending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Guardando…
+                  </>
+                ) : (
+                  "Guardar cambios"
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+      >
+        <AlertDialogContent className="bg-card border-border">
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar asesor?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Se eliminará el perfil de{" "}
+              <span className="font-medium text-foreground">
+                {deleteTarget ? profileName(deleteTarget) : ""}
+              </span>
+              . Los clientes asignados quedarán sin asesor. Esta acción no se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteMutation.isPending}>
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleteMutation.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                if (deleteTarget) deleteMutation.mutate(deleteTarget.id);
+              }}
+            >
+              {deleteMutation.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Eliminando…
+                </>
+              ) : (
+                "Eliminar"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AgentPortfolioModal
+        agent={portfolioAgent}
+        open={!!portfolioAgent}
+        onOpenChange={(o) => !o && setPortfolioAgent(null)}
+      />
     </div>
+  );
+}
+
+function AgentFormFields({
+  firstName,
+  lastName,
+  email,
+  password,
+  onFirstName,
+  onLastName,
+  onEmail,
+  onPassword,
+  passwordRequired,
+  passwordHint,
+}: {
+  firstName: string;
+  lastName: string;
+  email: string;
+  password: string;
+  onFirstName: (v: string) => void;
+  onLastName: (v: string) => void;
+  onEmail: (v: string) => void;
+  onPassword: (v: string) => void;
+  passwordRequired: boolean;
+  passwordHint?: string;
+}) {
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="agent-form-first-name">Nombre</Label>
+          <Input
+            id="agent-form-first-name"
+            value={firstName}
+            onChange={(e) => onFirstName(e.target.value)}
+            className="bg-surface-elevated border-border"
+            required
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="agent-form-last-name">Apellido</Label>
+          <Input
+            id="agent-form-last-name"
+            value={lastName}
+            onChange={(e) => onLastName(e.target.value)}
+            className="bg-surface-elevated border-border"
+          />
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="agent-form-email">Correo de acceso</Label>
+        <Input
+          id="agent-form-email"
+          type="email"
+          value={email}
+          onChange={(e) => onEmail(e.target.value)}
+          className="bg-surface-elevated border-border"
+          autoComplete="off"
+          required
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="agent-form-password">
+          {passwordRequired ? "Contraseña temporal" : "Nueva contraseña"}
+        </Label>
+        <Input
+          id="agent-form-password"
+          type="password"
+          value={password}
+          onChange={(e) => onPassword(e.target.value)}
+          className="bg-surface-elevated border-border"
+          autoComplete="new-password"
+          required={passwordRequired}
+          minLength={passwordRequired ? 8 : undefined}
+        />
+        {passwordHint && (
+          <p className="text-xs text-muted-foreground">{passwordHint}</p>
+        )}
+      </div>
+    </>
   );
 }

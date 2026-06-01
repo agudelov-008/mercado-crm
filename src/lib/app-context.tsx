@@ -22,12 +22,14 @@ interface ProfileData {
   first_name: string | null;
   last_name: string | null;
   role: ProfileRole;
+  affiliate_name: string | null;
 }
 
 interface AppContextValue {
   role: Role;
   setRole: (r: Role) => void;
   profileRole: ProfileRole | null;
+  affiliateName: string | null;
   currentUser: {
     name: string;
     initials: string;
@@ -50,6 +52,7 @@ const defaultCurrentUser: AppContextValue["currentUser"] = {
 export function AppProvider({ children }: { children: ReactNode }) {
   const { user, isLoading: isAuthLoading } = useAuth();
   const [profileRole, setProfileRole] = useState<ProfileRole | null>(null);
+  const [affiliateName, setAffiliateName] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<AppContextValue["currentUser"]>(defaultCurrentUser);
 
   useEffect(() => {
@@ -61,13 +64,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!user) {
         if (!isMounted) return;
         setProfileRole(null);
+        setAffiliateName(null);
         setCurrentUser(defaultCurrentUser);
         return;
       }
 
       const { data: profileData } = await supabase
         .from("profiles")
-        .select("email, first_name, last_name, role")
+        .select("email, first_name, last_name, role, affiliate_name")
         .eq("id", user.id)
         .maybeSingle();
 
@@ -88,6 +92,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!isMounted) return;
 
       setProfileRole(profile?.role ?? "Agent");
+      setAffiliateName(profile?.affiliate_name?.trim() || null);
       setCurrentUser({
         name: fullName,
         initials,
@@ -114,7 +119,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AppContext.Provider value={{ role, setRole, profileRole, currentUser }}>
+    <AppContext.Provider value={{ role, setRole, profileRole, affiliateName, currentUser }}>
       {children}
     </AppContext.Provider>
   );

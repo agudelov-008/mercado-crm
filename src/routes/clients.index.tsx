@@ -5,21 +5,25 @@ import {
   ArrowDown,
   ArrowUp,
   ExternalLink,
+  FileUp,
   Loader2,
-  MessageCircle,
   Phone,
+  Plus,
+  UserCog,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { Client } from "@/lib/mock-data";
+import { fetchAgentsForOwnerSelect } from "@/lib/user-management";
 import {
+  bulkUpdateClientOwner,
   bulkUpdateLeadStatus,
   clientDetailIdFromPhone,
   CLIENT_TABLE_COLUMNS,
+  type ClientTableColumnDef,
   EMPTY_FILTERS,
   fetchSecureClients,
   formatClientDate,
   LEAD_STATUS_OPTIONS,
-  type ClientTableColumnDef,
   type LeadStatus,
   type SecureClient,
   type SecureClientColumn,
@@ -45,8 +49,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { CallModal } from "@/components/CallModal";
-import { MessageModal } from "@/components/MessageModal";
+import { ClientImportModal } from "@/components/ClientImportModal";
+import { ManualClientModal } from "@/components/ManualClientModal";
 import { cn } from "@/lib/utils";
+import { useApp, type ProfileRole } from "@/lib/app-context";
+import { useAuth } from "@/lib/auth-context";
 
 export const Route = createFileRoute("/clients/")({ component: ClientsPage });
 
@@ -80,8 +87,34 @@ function secureClientToModalClient(row: SecureClient): Client {
   };
 }
 
+const STATUS_COLUMNS: SecureClientColumn[] = [
+  "lead_status",
+  "previous_lead_status",
+];
+
+const RESTRICTED_COLUMNS_FOR_FIELD_ROLES: SecureClientColumn[] = [
+  "owner_id",
+  "previous_owner_id",
+];
+
+function getVisibleColumns(profileRole: ProfileRole | null): ClientTableColumnDef[] {
+  if (profileRole === "Agent" || profileRole === "Affiliate") {
+    return CLIENT_TABLE_COLUMNS.filter(
+      (col) => !RESTRICTED_COLUMNS_FOR_FIELD_ROLES.includes(col.key),
+    );
+  }
+  return CLIENT_TABLE_COLUMNS;
+}
+
+function canManageClients(profileRole: ProfileRole | null): boolean {
+  return profileRole === "Admin" || profileRole === "Manager";
+}
+
 function getCellValue(row: SecureClient, column: SecureClientColumn): string {
   const value = row[column];
+  if (column === "total_calls") {
+    return value === null || value === undefined ? "—" : String(value);
+  }
   if (value === null || value === undefined) return "—";
   if (
     column === "created_on" ||
@@ -92,6 +125,20 @@ function getCellValue(row: SecureClient, column: SecureClientColumn): string {
     return formatClientDate(String(value));
   }
   return String(value);
+}
+
+function renderStatusBadge(status: string) {
+  return (
+    <span
+      className={cn(
+        "text-[10px] px-1.5 py-0.5 rounded border",
+        leadStatusStyles[status] ??
+          "bg-muted/30 text-muted-foreground border-border",
+      )}
+    >
+      {status}
+    </span>
+  );
 }
 
 function SortButtons({
@@ -146,8 +193,8 @@ function ColumnFilter({
   onChange: (next: SecureClientFilters) => void;
 }) {
   if (col.filterType === "text") {
-    const key = col.key as keyof Pick<
-      SecureClientFilters,
+    const key = col.key as Extract<
+      SecureClientColumn,
       | "first_name"
       | "last_name"
       | "country"
@@ -155,6 +202,8 @@ function ColumnFilter({
       | "tp_account"
       | "phone"
       | "email"
+      | "owner_id"
+      | "previous_owner_id"
     >;
     return (
       <Input
@@ -167,12 +216,30 @@ function ColumnFilter({
     );
   }
 
+  if (col.filterType === "number") {
+    const key = col.key as "total_calls";
+    return (
+      <Input
+        type="number"
+        min={0}
+        inputMode="numeric"
+        value={filters[key]}
+        onChange={(e) => onChange({ ...filters, [key]: e.target.value })}
+        placeholder="0"
+        className="h-7 min-w-0 text-xs p-1 bg-slate-900 border-slate-800 text-slate-300 w-full rounded tabular-nums"
+        onClick={(e) => e.stopPropagation()}
+        aria-label={`Filtrar ${col.label}`}
+      />
+    );
+  }
+
   if (col.filterType === "select") {
+    const key = col.key as "lead_status" | "previous_lead_status";
     return (
       <Select
-        value={filters.lead_status || "all"}
+        value={filters[key] || "all"}
         onValueChange={(v) =>
-          onChange({ ...filters, lead_status: v === "all" ? "" : v })
+          onChange({ ...filters, [key]: v === "all" ? "" : v })
         }
       >
         <SelectTrigger
@@ -209,23 +276,90 @@ function ColumnFilter({
 function ClientsPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { user, isLoading: isAuthLoading } = useAuth();
+  const { profileRole } = useApp();
+  const profileId = user?.id;
+  const isProfileReady = !!profileId && profileRole !== null && !isAuthLoading;
+  const isAgent = profileRole === "Agent";
+  const canManage = canManageClients(profileRole);
+  const visibleColumns = useMemo(
+    () => getVisibleColumns(profileRole),
+    [profileRole],
+  );
+  const tableColSpan = visibleColumns.length + (canManage ? 2 : 1);
   const [filters, setFilters] = useState<SecureClientFilters>(EMPTY_FILTERS);
   const [sort, setSort] = useState<SecureClientSort | null>(null);
   const [selectedPhones, setSelectedPhones] = useState<Set<string>>(new Set());
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkStatus, setBulkStatus] = useState<LeadStatus>("New");
+  const [bulkAssignAgentId, setBulkAssignAgentId] = useState<string>("");
   const [callClient, setCallClient] = useState<Client | null>(null);
-  const [msgClient, setMsgClient] = useState<Client | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [manualOpen, setManualOpen] = useState(false);
 
   const queryKey = useMemo(
-    () => ["secure-clients", filters, sort] as const,
-    [filters, sort],
+    () => ["secure-clients", profileId, filters, sort] as const,
+    [profileId, filters, sort],
   );
 
-  const { data: clients = [], isLoading, isError, error } = useQuery({
+  const {
+    data: clients = [],
+    isPending,
+    isFetching,
+    isError,
+    error,
+  } = useQuery({
     queryKey,
     queryFn: () => fetchSecureClients(filters, sort),
+    enabled: isProfileReady,
     staleTime: 30_000,
+  });
+
+  const isLoadingClients = !isProfileReady || isPending || isFetching;
+
+  const { data: agentOptions = [], isLoading: agentsLoading } = useQuery({
+    queryKey: ["agent-profiles-bulk-assign"],
+    queryFn: fetchAgentsForOwnerSelect,
+    enabled: isProfileReady && canManage,
+    staleTime: 60_000,
+  });
+
+  const bulkOwnerMutation = useMutation({
+    mutationFn: ({
+      phones,
+      ownerId,
+    }: {
+      phones: string[];
+      ownerId: string;
+    }) => bulkUpdateClientOwner(phones, ownerId),
+    onMutate: async ({ phones, ownerId }) => {
+      await queryClient.cancelQueries({ queryKey });
+      const previous = queryClient.getQueryData<SecureClient[]>(queryKey);
+      queryClient.setQueryData<SecureClient[]>(queryKey, (old) =>
+        old?.map((row) =>
+          phones.includes(row.phone) ? { ...row, owner_id: ownerId } : row,
+        ),
+      );
+      return { previous };
+    },
+    onSuccess: (_data, { phones }) => {
+      toast.success(
+        `Asesor asignado a ${phones.length} cliente${phones.length === 1 ? "" : "s"}.`,
+      );
+      setSelectedPhones(new Set());
+      setBulkAssignAgentId("");
+    },
+    onError: (err, _vars, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(queryKey, context.previous);
+      }
+      toast.error(
+        err instanceof Error ? err.message : "Error al asignar el asesor.",
+      );
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["secure-clients"] });
+    },
   });
 
   const bulkMutation = useMutation({
@@ -274,7 +408,8 @@ function ClientsPage() {
 
   const allSelected =
     clients.length > 0 && selectedPhones.size === clients.length;
-  const someSelected = selectedPhones.size > 0;
+  const multiSelected = selectedPhones.size >= 2;
+  const isBulkProcessing = bulkMutation.isPending || bulkOwnerMutation.isPending;
 
   const toggleAll = () => {
     if (allSelected) {
@@ -299,6 +434,16 @@ function ClientsPage() {
     bulkMutation.mutate({ phones, leadStatus: bulkStatus });
   };
 
+  const handleBulkAssignOwner = () => {
+    const phones = Array.from(selectedPhones);
+    if (phones.length < 2) return;
+    if (!bulkAssignAgentId) {
+      toast.error("Selecciona un asesor antes de confirmar.");
+      return;
+    }
+    bulkOwnerMutation.mutate({ phones, ownerId: bulkAssignAgentId });
+  };
+
   const openClientDetail = (phone: string) => {
     navigate({
       to: "/clients/$id",
@@ -308,45 +453,119 @@ function ClientsPage() {
 
   return (
     <div className="p-6 lg:p-8 space-y-6 max-w-[1800px] mx-auto">
-      <div>
-        <h1 className="text-2xl font-semibold">Clients</h1>
-        <p className="text-sm text-muted-foreground">
-          {isLoading
-            ? "Cargando clientes…"
-            : `${clients.length} cuenta${clients.length === 1 ? "" : "s"} (vista segura)`}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold">Clients</h1>
+          <p className="text-sm text-muted-foreground">
+            {isLoadingClients
+              ? "Cargando clientes…"
+              : isAgent
+                ? `${clients.length} cliente${clients.length === 1 ? "" : "s"} en tu cartera`
+                : `${clients.length} cuenta${clients.length === 1 ? "" : "s"} (vista segura)`}
+          </p>
+        </div>
+        {canManage && (
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setManualOpen(true)}
+              className="border-primary/40 bg-primary/10 hover:bg-primary/20"
+            >
+              <Plus className="h-4 w-4" />
+              Agregar Cliente
+            </Button>
+            <Button
+              type="button"
+              onClick={() => setImportOpen(true)}
+              className="bg-primary hover:bg-primary/90"
+            >
+              <FileUp className="h-4 w-4" />
+              Importar Excel / CSV
+            </Button>
+          </div>
+        )}
       </div>
 
-      {someSelected && (
+      {canManage && multiSelected && (
         <div className="sticky top-0 z-20 rounded-xl border border-primary/40 bg-primary/10 backdrop-blur px-4 py-3 flex flex-wrap items-center justify-between gap-3 shadow-elegant">
           <p className="text-sm font-medium">
-            {selectedPhones.size} cliente
-            {selectedPhones.size === 1 ? "" : "s"} seleccionado
-            {selectedPhones.size === 1 ? "" : "s"}
+            {selectedPhones.size} clientes seleccionados
           </p>
-          <Button
-            size="sm"
-            onClick={() => setBulkOpen(true)}
-            disabled={bulkMutation.isPending}
-          >
-            Modificar Status Masivo
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-2 min-w-[220px]">
+              <UserCog className="h-4 w-4 text-primary shrink-0" />
+              <Select
+                value={bulkAssignAgentId || undefined}
+                onValueChange={setBulkAssignAgentId}
+                disabled={isBulkProcessing || agentsLoading}
+              >
+                <SelectTrigger className="h-9 bg-surface-elevated border-border text-sm min-w-[180px]">
+                  <SelectValue
+                    placeholder={
+                      agentsLoading ? "Cargando asesores…" : "Asignar asesor…"
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {agentOptions.map((agent) => (
+                    <SelectItem key={agent.id} value={agent.id}>
+                      {agent.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={handleBulkAssignOwner}
+                disabled={isBulkProcessing || !bulkAssignAgentId}
+              >
+                {bulkOwnerMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  "Confirmar"
+                )}
+              </Button>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setBulkOpen(true)}
+              disabled={isBulkProcessing}
+            >
+              Modificar Status
+            </Button>
+          </div>
         </div>
       )}
 
-      <div className="rounded-xl border border-border bg-card/40 overflow-hidden">
+      <div className="relative rounded-xl border border-border bg-card/40 overflow-hidden">
+        {isBulkProcessing && (
+          <div
+            className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-2 bg-background/70 backdrop-blur-sm"
+            aria-live="polite"
+            aria-busy="true"
+          >
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <p className="text-sm text-muted-foreground">Procesando lote en Supabase…</p>
+          </div>
+        )}
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[1400px]">
+          <table className="w-full text-sm min-w-[1800px]">
             <thead className="bg-surface-elevated/60 text-xs uppercase tracking-wider text-muted-foreground">
               <tr>
-                <th className="w-10 px-3 py-3">
-                  <Checkbox
-                    checked={allSelected}
-                    onCheckedChange={toggleAll}
-                    aria-label="Seleccionar todos"
-                  />
-                </th>
-                {CLIENT_TABLE_COLUMNS.map((col) => (
+                {canManage && (
+                  <th className="w-10 px-3 py-3">
+                    <Checkbox
+                      checked={allSelected}
+                      onCheckedChange={toggleAll}
+                      disabled={isBulkProcessing}
+                      aria-label="Seleccionar todos"
+                    />
+                  </th>
+                )}
+                {visibleColumns.map((col) => (
                   <th
                     key={col.key}
                     className="text-left px-3 py-3 font-medium whitespace-nowrap"
@@ -366,8 +585,8 @@ function ClientsPage() {
                 </th>
               </tr>
               <tr className="border-t border-border/60 normal-case tracking-normal">
-                <th className="px-3 py-1.5 w-10" />
-                {CLIENT_TABLE_COLUMNS.map((col) => (
+                {canManage && <th className="px-3 py-1.5 w-10" />}
+                {visibleColumns.map((col) => (
                   <th
                     key={`filter-${col.key}`}
                     className="px-3 py-1.5 align-middle max-w-[140px]"
@@ -385,10 +604,10 @@ function ClientsPage() {
               </tr>
             </thead>
             <tbody>
-              {isLoading && (
+              {isLoadingClients && (
                 <tr>
                   <td
-                    colSpan={CLIENT_TABLE_COLUMNS.length + 2}
+                    colSpan={tableColSpan}
                     className="px-4 py-12 text-center text-muted-foreground"
                   >
                     <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
@@ -396,10 +615,10 @@ function ClientsPage() {
                   </td>
                 </tr>
               )}
-              {isError && !isLoading && (
+              {isError && !isLoadingClients && (
                 <tr>
                   <td
-                    colSpan={CLIENT_TABLE_COLUMNS.length + 2}
+                    colSpan={tableColSpan}
                     className="px-4 py-8 text-center text-destructive"
                   >
                     {error instanceof Error
@@ -408,17 +627,17 @@ function ClientsPage() {
                   </td>
                 </tr>
               )}
-              {!isLoading && !isError && clients.length === 0 && (
+              {!isLoadingClients && !isError && clients.length === 0 && (
                 <tr>
                   <td
-                    colSpan={CLIENT_TABLE_COLUMNS.length + 2}
+                    colSpan={tableColSpan}
                     className="px-4 py-8 text-center text-muted-foreground"
                   >
                     No hay clientes que coincidan con los filtros.
                   </td>
                 </tr>
               )}
-              {!isLoading &&
+              {!isLoadingClients &&
                 !isError &&
                 clients.map((row) => {
                   const modalClient = secureClientToModalClient(row);
@@ -440,29 +659,29 @@ function ClientsPage() {
                         isSelected && "bg-primary/5",
                       )}
                     >
-                      <td className="px-3 py-3">
-                        <Checkbox
-                          checked={isSelected}
-                          onCheckedChange={() => toggleRow(row.phone)}
-                          onClick={(e) => e.stopPropagation()}
-                          aria-label={`Seleccionar ${row.phone}`}
-                        />
-                      </td>
-                      {CLIENT_TABLE_COLUMNS.map((col) => (
+                      {canManage && (
+                        <td className="px-3 py-3">
+                          <Checkbox
+                            checked={isSelected}
+                            onCheckedChange={() => toggleRow(row.phone)}
+                            onClick={(e) => e.stopPropagation()}
+                            disabled={isBulkProcessing}
+                            aria-label={`Seleccionar ${row.phone}`}
+                          />
+                        </td>
+                      )}
+                      {visibleColumns.map((col) => (
                         <td
                           key={`${row.phone}-${col.key}`}
                           className="px-3 py-3 whitespace-nowrap max-w-[200px] truncate"
                           title={getCellValue(row, col.key)}
                         >
-                          {col.key === "lead_status" && row.lead_status ? (
-                            <span
-                              className={cn(
-                                "text-[10px] px-1.5 py-0.5 rounded border",
-                                leadStatusStyles[row.lead_status] ??
-                                  "bg-muted/30 text-muted-foreground border-border",
-                              )}
-                            >
-                              {row.lead_status}
+                          {STATUS_COLUMNS.includes(col.key) &&
+                          row[col.key] ? (
+                            renderStatusBadge(String(row[col.key]))
+                          ) : col.key === "total_calls" ? (
+                            <span className="tabular-nums font-medium">
+                              {getCellValue(row, col.key)}
                             </span>
                           ) : (
                             getCellValue(row, col.key)
@@ -494,17 +713,6 @@ function ClientsPage() {
                             aria-label="Llamar"
                           >
                             <Phone className="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setMsgClient(modalClient);
-                            }}
-                            className="h-8 w-8 rounded-md bg-info/15 hover:bg-info/25 text-info border border-info/30 flex items-center justify-center"
-                            aria-label="Mensaje"
-                          >
-                            <MessageCircle className="h-3.5 w-3.5" />
                           </button>
                         </div>
                       </td>
@@ -547,7 +755,7 @@ function ClientsPage() {
             </Button>
             <Button
               onClick={handleBulkSubmit}
-              disabled={bulkMutation.isPending}
+              disabled={isBulkProcessing}
             >
               {bulkMutation.isPending ? (
                 <>
@@ -567,11 +775,12 @@ function ClientsPage() {
         onOpenChange={(o) => !o && setCallClient(null)}
         client={callClient}
       />
-      <MessageModal
-        open={!!msgClient}
-        onOpenChange={(o) => !o && setMsgClient(null)}
-        client={msgClient}
-      />
+      {canManage && (
+        <>
+          <ClientImportModal open={importOpen} onOpenChange={setImportOpen} />
+          <ManualClientModal open={manualOpen} onOpenChange={setManualOpen} />
+        </>
+      )}
     </div>
   );
 }
