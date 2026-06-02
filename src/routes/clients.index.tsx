@@ -23,12 +23,16 @@ import {
   EMPTY_FILTERS,
   fetchSecureClients,
   formatClientDate,
+  formatOwnerDisplayName,
+  LEAD_STATUS_BADGE_STYLES,
   LEAD_STATUS_OPTIONS,
+  normalizeLeadStatus,
   type LeadStatus,
   type SecureClient,
   type SecureClientColumn,
   type SecureClientFilters,
   type SecureClientSort,
+  type SecureClientWithOwners,
   type SortDirection,
 } from "@/lib/secure-clients";
 import { Input } from "@/components/ui/input";
@@ -56,15 +60,6 @@ import { useApp, type ProfileRole } from "@/lib/app-context";
 import { useAuth } from "@/lib/auth-context";
 
 export const Route = createFileRoute("/clients/")({ component: ClientsPage });
-
-const leadStatusStyles: Record<string, string> = {
-  New: "bg-info/15 text-info border-info/30",
-  Potential: "bg-primary/15 text-primary border-primary/30",
-  "Follow-Up": "bg-warning/15 text-warning border-warning/30",
-  "Call Again": "bg-warning/15 text-warning border-warning/30",
-  Converted: "bg-success/15 text-success border-success/30",
-  "Do Not Call": "bg-destructive/15 text-destructive border-destructive/30",
-};
 
 function secureClientToModalClient(row: SecureClient): Client {
   const name =
@@ -110,7 +105,13 @@ function canManageClients(profileRole: ProfileRole | null): boolean {
   return profileRole === "Admin" || profileRole === "Manager";
 }
 
-function getCellValue(row: SecureClient, column: SecureClientColumn): string {
+function getCellValue(row: SecureClientWithOwners, column: SecureClientColumn): string {
+  if (column === "owner_id") {
+    return formatOwnerDisplayName(row.owner);
+  }
+  if (column === "previous_owner_id") {
+    return formatOwnerDisplayName(row.previous_owner);
+  }
   const value = row[column];
   if (column === "total_calls") {
     return value === null || value === undefined ? "—" : String(value);
@@ -132,7 +133,7 @@ function renderStatusBadge(status: string) {
     <span
       className={cn(
         "text-[10px] px-1.5 py-0.5 rounded border",
-        leadStatusStyles[status] ??
+        LEAD_STATUS_BADGE_STYLES[status as LeadStatus] ??
           "bg-muted/30 text-muted-foreground border-border",
       )}
     >
@@ -334,8 +335,8 @@ function ClientsPage() {
     }) => bulkUpdateClientOwner(phones, ownerId),
     onMutate: async ({ phones, ownerId }) => {
       await queryClient.cancelQueries({ queryKey });
-      const previous = queryClient.getQueryData<SecureClient[]>(queryKey);
-      queryClient.setQueryData<SecureClient[]>(queryKey, (old) =>
+      const previous = queryClient.getQueryData<SecureClientWithOwners[]>(queryKey);
+      queryClient.setQueryData<SecureClientWithOwners[]>(queryKey, (old) =>
         old?.map((row) =>
           phones.includes(row.phone) ? { ...row, owner_id: ownerId } : row,
         ),
@@ -372,8 +373,8 @@ function ClientsPage() {
     }) => bulkUpdateLeadStatus(phones, leadStatus),
     onMutate: async ({ phones, leadStatus }) => {
       await queryClient.cancelQueries({ queryKey });
-      const previous = queryClient.getQueryData<SecureClient[]>(queryKey);
-      queryClient.setQueryData<SecureClient[]>(queryKey, (old) =>
+      const previous = queryClient.getQueryData<SecureClientWithOwners[]>(queryKey);
+      queryClient.setQueryData<SecureClientWithOwners[]>(queryKey, (old) =>
         old?.map((row) =>
           phones.includes(row.phone)
             ? { ...row, lead_status: leadStatus }
@@ -431,7 +432,8 @@ function ClientsPage() {
   const handleBulkSubmit = () => {
     const phones = Array.from(selectedPhones);
     if (phones.length === 0) return;
-    bulkMutation.mutate({ phones, leadStatus: bulkStatus });
+    const leadStatus = normalizeLeadStatus(bulkStatus, { strict: true });
+    bulkMutation.mutate({ phones, leadStatus });
   };
 
   const handleBulkAssignOwner = () => {
@@ -556,10 +558,15 @@ function ClientsPage() {
             <thead className="bg-surface-elevated/60 text-xs uppercase tracking-wider text-muted-foreground">
               <tr>
                 {canManage && (
-                  <th className="w-10 px-3 py-3">
+                  <th
+                    data-bulk-select-cell
+                    className="w-10 px-3 py-3"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <Checkbox
                       checked={allSelected}
                       onCheckedChange={toggleAll}
+                      onClick={(e) => e.stopPropagation()}
                       disabled={isBulkProcessing}
                       aria-label="Seleccionar todos"
                     />
@@ -647,8 +654,24 @@ function ClientsPage() {
                       key={row.phone}
                       role="button"
                       tabIndex={0}
-                      onClick={() => openClientDetail(row.phone)}
+                      onClick={(e) => {
+                        if (
+                          (e.target as HTMLElement).closest(
+                            "[data-bulk-select-cell]",
+                          )
+                        ) {
+                          return;
+                        }
+                        openClientDetail(row.phone);
+                      }}
                       onKeyDown={(e) => {
+                        if (
+                          (e.target as HTMLElement).closest(
+                            "[data-bulk-select-cell]",
+                          )
+                        ) {
+                          return;
+                        }
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
                           openClientDetail(row.phone);
@@ -660,7 +683,11 @@ function ClientsPage() {
                       )}
                     >
                       {canManage && (
-                        <td className="px-3 py-3">
+                        <td
+                          data-bulk-select-cell
+                          className="px-3 py-3 w-10"
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           <Checkbox
                             checked={isSelected}
                             onCheckedChange={() => toggleRow(row.phone)}
@@ -736,7 +763,7 @@ function ClientsPage() {
           </p>
           <Select
             value={bulkStatus}
-            onValueChange={(v) => setBulkStatus(v as LeadStatus)}
+            onValueChange={(v) => setBulkStatus(normalizeLeadStatus(v))}
           >
             <SelectTrigger className="bg-surface-elevated border-border">
               <SelectValue placeholder="Lead Status" />

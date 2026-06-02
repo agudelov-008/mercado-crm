@@ -1,27 +1,123 @@
 import { supabase } from "@/lib/supabase";
 
-/** Valores del enum `lead_status` en Supabase (17 estados). */
+/**
+ * Valores oficiales del enum `lead_status_type` en PostgreSQL.
+ * Label y value deben coincidir textualmente (mayúsculas, espacios, < >).
+ */
 export const LEAD_STATUS_OPTIONS = [
-  "New",
-  "Potential",
-  "Follow-Up",
   "Call Again",
+  "Potentital",
+  "Follow-Up",
+  "Voicemail",
   "No Answer",
   "Wrong Number",
-  "Not Interested",
-  "Interested",
-  "Qualified",
-  "Hot Lead",
-  "Warm Lead",
-  "Cold Lead",
-  "Callback Scheduled",
-  "In Progress",
-  "Converted",
-  "Closed Lost",
-  "Do Not Call",
+  "Wrong Info",
+  "No registration",
+  "Profiled",
+  "Not Workeable",
+  "New",
+  "Nan",
+  "FTD",
+  "No Money <3 Days",
+  "No Money >3 Days",
+  "No interested",
+  "Answer and hang up",
 ] as const;
 
 export type LeadStatus = (typeof LEAD_STATUS_OPTIONS)[number];
+
+const DEFAULT_LEAD_STATUS: LeadStatus = "New";
+
+/** Estilos de badge por estado (tabla y detalle). */
+export const LEAD_STATUS_BADGE_STYLES: Record<LeadStatus, string> = {
+  New: "bg-info/15 text-info border-info/30",
+  Potentital: "bg-primary/15 text-primary border-primary/30",
+  "Follow-Up": "bg-warning/15 text-warning border-warning/30",
+  "Call Again": "bg-warning/15 text-warning border-warning/30",
+  Voicemail: "bg-muted/30 text-muted-foreground border-border",
+  "No Answer": "bg-muted/30 text-muted-foreground border-border",
+  "Wrong Number": "bg-destructive/15 text-destructive border-destructive/30",
+  "Wrong Info": "bg-destructive/15 text-destructive border-destructive/30",
+  "No registration": "bg-destructive/15 text-destructive border-destructive/30",
+  Profiled: "bg-primary/15 text-primary border-primary/30",
+  "Not Workeable": "bg-destructive/15 text-destructive border-destructive/30",
+  Nan: "bg-muted/30 text-muted-foreground border-border",
+  FTD: "bg-success/15 text-success border-success/30",
+  "No Money <3 Days": "bg-warning/15 text-warning border-warning/30",
+  "No Money >3 Days": "bg-warning/15 text-warning border-warning/30",
+  "No interested": "bg-destructive/15 text-destructive border-destructive/30",
+  "Answer and hang up": "bg-warning/15 text-warning border-warning/30",
+};
+
+/** Variantes de UI/import → etiqueta exacta del enum PostgreSQL `lead_status_type`. */
+const LEAD_STATUS_ALIAS_TO_ENUM: Record<string, LeadStatus> = {
+  new: "New",
+  nuevo: "New",
+  potential: "Potentital",
+  potencial: "Potentital",
+  potentital: "Potentital",
+  "follow-up": "Follow-Up",
+  "follow up": "Follow-Up",
+  followup: "Follow-Up",
+  voicemail: "Voicemail",
+  "call again": "Call Again",
+  "no answer": "No Answer",
+  "wrong number": "Wrong Number",
+  "wrong info": "Wrong Info",
+  "no registration": "No registration",
+  profiled: "Profiled",
+  "not workeable": "Not Workeable",
+  "not workable": "Not Workeable",
+  nan: "Nan",
+  ftd: "FTD",
+  "no money <3 days": "No Money <3 Days",
+  "no money >3 days": "No Money >3 Days",
+  "no interested": "No interested",
+  "not interested": "No interested",
+  "answer and hang up": "Answer and hang up",
+  converted: "FTD",
+  "do not call": "Not Workeable",
+};
+
+/**
+ * Convierte un string de UI/import al valor exacto del enum en Postgres.
+ * Evita 400 por diferencias de mayúsculas o espacios.
+ */
+export function normalizeLeadStatus(
+  value: string | null | undefined,
+  options?: { strict?: boolean },
+): LeadStatus {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) return DEFAULT_LEAD_STATUS;
+
+  const exact = LEAD_STATUS_OPTIONS.find((status) => status === trimmed);
+  if (exact) return exact;
+
+  const caseInsensitive = LEAD_STATUS_OPTIONS.find(
+    (status) => status.toLowerCase() === trimmed.toLowerCase(),
+  );
+  if (caseInsensitive) return caseInsensitive;
+
+  const aliasKey = trimmed.toLowerCase().replace(/\s+/g, " ");
+  const fromAlias = LEAD_STATUS_ALIAS_TO_ENUM[aliasKey];
+  if (fromAlias) return fromAlias;
+
+  const compact = aliasKey.replace(/[-\s]/g, "");
+  const compactMatch = LEAD_STATUS_OPTIONS.find(
+    (status) =>
+      status.toLowerCase().replace(/[-\s]/g, "") === compact ||
+      status.toLowerCase().replace(/[\s-]/g, "") === compact,
+  );
+  if (compactMatch) return compactMatch;
+
+  if (options?.strict) {
+    throw new Error(
+      `Estado "${trimmed}" no es válido. Valores permitidos: ${LEAD_STATUS_OPTIONS.join(", ")}`,
+    );
+  }
+
+  return DEFAULT_LEAD_STATUS;
+}
 
 export interface SecureClientOwnerProfile {
   first_name: string | null;
@@ -48,10 +144,14 @@ export interface SecureClient {
   updated_at: string | null;
 }
 
-/** Cliente de detalle con perfil del asesor (owner) resuelto. */
-export interface SecureClientDetail extends SecureClient {
+/** Cliente con perfiles de asesor actual y anterior resueltos vía join. */
+export interface SecureClientWithOwners extends SecureClient {
   owner: SecureClientOwnerProfile | null;
+  previous_owner: SecureClientOwnerProfile | null;
 }
+
+/** Cliente de detalle con perfiles de asesor resueltos. */
+export type SecureClientDetail = SecureClientWithOwners;
 
 export type SecureClientColumn = keyof SecureClient;
 
@@ -155,6 +255,8 @@ export const CLIENT_TABLE_COLUMNS: ClientTableColumnDef[] = [
 
 const SELECT_COLUMNS = CLIENT_TABLE_COLUMNS.map((c) => c.key).join(",");
 
+const SELECT_WITH_PROFILES = `${SELECT_COLUMNS}, owner:profiles!owner_id(first_name, last_name, email), previous_owner:profiles!previous_owner_id(first_name, last_name, email)`;
+
 const TEXT_FILTER_KEYS: TextFilterKey[] = [
   "first_name",
   "last_name",
@@ -199,28 +301,17 @@ export function formatOwnerDisplayName(
   return fullName || owner.email || "Sin asignar";
 }
 
-async function fetchOwnerProfileById(
-  ownerId: string,
-): Promise<SecureClientOwnerProfile | null> {
-  const { data, error } = await supabase
-    .from("profiles")
-    .select("first_name, last_name, email")
-    .eq("id", ownerId)
-    .maybeSingle();
+type ClientRowWithProfileJoins = SecureClient & {
+  owner?: SecureClientOwnerProfile | SecureClientOwnerProfile[] | null;
+  previous_owner?: SecureClientOwnerProfile | SecureClientOwnerProfile[] | null;
+};
 
-  if (error) return null;
-  return (data as SecureClientOwnerProfile | null) ?? null;
-}
-
-function mapClientDetailRow(
-  row: SecureClient & {
-    owner?: SecureClientOwnerProfile | SecureClientOwnerProfile[] | null;
-  },
-): SecureClientDetail {
-  const { owner, ...clientFields } = row;
+function mapClientRowWithProfiles(row: ClientRowWithProfileJoins): SecureClientWithOwners {
+  const { owner, previous_owner, ...clientFields } = row;
   return {
     ...(clientFields as SecureClient),
     owner: normalizeOwnerProfile(owner),
+    previous_owner: normalizeOwnerProfile(previous_owner),
   };
 }
 
@@ -228,37 +319,26 @@ export async function fetchSecureClientByPhone(
   phone: string,
 ): Promise<SecureClientDetail | null> {
   try {
-    const detailSelect = `${SELECT_COLUMNS}, owner:profiles!owner_id (first_name, last_name, email)`;
-
     const { data: fromClients, error: clientsError } = await supabase
       .from("clients")
-      .select(detailSelect)
+      .select(SELECT_WITH_PROFILES)
       .eq("phone", phone)
       .maybeSingle();
 
     if (!clientsError && fromClients) {
-      return mapClientDetailRow(
-        fromClients as unknown as SecureClient & {
-          owner?: SecureClientOwnerProfile | SecureClientOwnerProfile[] | null;
-        },
-      );
+      return mapClientRowWithProfiles(fromClients as unknown as ClientRowWithProfileJoins);
     }
 
     const { data, error } = await supabase
       .from("secure_clients")
-      .select(SELECT_COLUMNS)
+      .select(SELECT_WITH_PROFILES)
       .eq("phone", phone)
       .maybeSingle();
 
     if (error) throw error;
     if (!data) return null;
 
-    const client = data as unknown as SecureClient;
-    const owner = client.owner_id
-      ? await fetchOwnerProfileById(client.owner_id)
-      : null;
-
-    return { ...client, owner };
+    return mapClientRowWithProfiles(data as unknown as ClientRowWithProfileJoins);
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "No se pudo cargar el cliente.";
@@ -269,9 +349,9 @@ export async function fetchSecureClientByPhone(
 export async function fetchSecureClients(
   filters: SecureClientFilters,
   sort: SecureClientSort | null,
-): Promise<SecureClient[]> {
+): Promise<SecureClientWithOwners[]> {
   try {
-    let query = supabase.from("secure_clients").select(SELECT_COLUMNS);
+    let query = supabase.from("secure_clients").select(SELECT_WITH_PROFILES);
 
     for (const key of TEXT_FILTER_KEYS) {
       const value = filters[key].trim();
@@ -321,7 +401,9 @@ export async function fetchSecureClients(
 
     const { data, error } = await query;
     if (error) throw error;
-    return (data ?? []) as unknown as SecureClient[];
+    return ((data ?? []) as unknown as ClientRowWithProfileJoins[]).map(
+      mapClientRowWithProfiles,
+    );
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "No se pudieron cargar los clientes.";
@@ -373,15 +455,23 @@ export async function bulkUpdateClientOwner(
 
 export async function bulkUpdateLeadStatus(
   phones: string[],
-  leadStatus: LeadStatus,
+  leadStatus: LeadStatus | string,
 ): Promise<void> {
+  const normalizedStatus = normalizeLeadStatus(leadStatus, { strict: true });
+
   try {
     const { error } = await supabase
       .from("clients")
-      .update({ lead_status: leadStatus })
+      .update({ lead_status: normalizedStatus })
       .in("phone", phones);
 
-    if (error) throw error;
+    if (error) {
+      throw new Error(
+        error.message.includes("lead_status")
+          ? `${error.message} (valor enviado: "${normalizedStatus}")`
+          : error.message,
+      );
+    }
   } catch (err) {
     const message =
       err instanceof Error
@@ -400,4 +490,16 @@ export function formatClientDate(value: string | null): string {
     month: "short",
     day: "numeric",
   });
+}
+
+export function formatClientDateTime(value: string | null): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const dd = String(date.getDate()).padStart(2, "0");
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const yyyy = date.getFullYear();
+  const hh = String(date.getHours()).padStart(2, "0");
+  const min = String(date.getMinutes()).padStart(2, "0");
+  return `${dd}/${mm}/${yyyy} ${hh}:${min}`;
 }

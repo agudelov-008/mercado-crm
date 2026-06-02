@@ -1,6 +1,6 @@
 import * as XLSX from "xlsx";
 import { supabase } from "@/lib/supabase";
-import { LEAD_STATUS_OPTIONS, type LeadStatus } from "@/lib/secure-clients";
+import { normalizeLeadStatus, type LeadStatus } from "@/lib/secure-clients";
 
 export type ImportableClientField =
   | "first_name"
@@ -83,8 +83,6 @@ const CHUNK_SIZE = 200;
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const DEFAULT_LEAD_STATUS: LeadStatus = "New";
-
 function emptyToNull(value: string | null | undefined): string | null {
   if (value === null || value === undefined) return null;
   const trimmed = value.trim();
@@ -95,15 +93,6 @@ function sanitizeOwnerId(value: string | null | undefined): string | null {
   const trimmed = value?.trim() ?? "";
   if (!trimmed || !UUID_REGEX.test(trimmed)) return null;
   return trimmed;
-}
-
-function sanitizeLeadStatus(value: string | null | undefined): LeadStatus {
-  const trimmed = value?.trim() ?? "";
-  if (!trimmed) return DEFAULT_LEAD_STATUS;
-  const match = LEAD_STATUS_OPTIONS.find(
-    (status) => status.toLowerCase() === trimmed.toLowerCase(),
-  );
-  return match ?? DEFAULT_LEAD_STATUS;
 }
 
 /** Normaliza tipos antes de insert/upsert para evitar rechazos 400 de PostgreSQL. */
@@ -118,7 +107,7 @@ export function sanitizeDbClientRow(row: DbClientRow): DbClientRow {
     affiliate: emptyToNull(row.affiliate),
     tp_account: emptyToNull(row.tp_account),
     email: emailRaw === "" ? null : emailRaw,
-    lead_status: sanitizeLeadStatus(row.lead_status),
+    lead_status: normalizeLeadStatus(row.lead_status),
     owner_id: sanitizeOwnerId(row.owner_id),
   };
 }
@@ -276,7 +265,7 @@ export function buildImportRows(
         tp_account: getMapped("tp_account"),
         phone,
         email: getMapped("email"),
-        lead_status: sanitizeLeadStatus(getMapped("lead_status")),
+        lead_status: normalizeLeadStatus(getMapped("lead_status")),
         owner_id: getMapped("owner_id"),
         sourceIndex,
         excelRowNumber: excelIndex + 2,

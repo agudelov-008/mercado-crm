@@ -36,11 +36,17 @@ import {
 
   formatClientDate,
 
+  formatClientDateTime,
+
   formatOwnerDisplayName,
+
+  LEAD_STATUS_BADGE_STYLES,
 
   phoneFromClientDetailId,
 
   updateClientOwner,
+
+  type LeadStatus,
 
   type SecureClient,
 
@@ -79,24 +85,6 @@ export const Route = createFileRoute("/clients/$id")({ component: ClientDetail }
 
 
 const NONE_OWNER = "__none__";
-
-
-
-const leadStatusStyles: Record<string, string> = {
-
-  New: "bg-info/15 text-info border-info/30",
-
-  Potential: "bg-primary/15 text-primary border-primary/30",
-
-  "Follow-Up": "bg-warning/15 text-warning border-warning/30",
-
-  "Call Again": "bg-warning/15 text-warning border-warning/30",
-
-  Converted: "bg-success/15 text-success border-success/30",
-
-  "Do Not Call": "bg-destructive/15 text-destructive border-destructive/30",
-
-};
 
 
 
@@ -193,6 +181,10 @@ function DetailField({
 }
 
 
+
+function resolvePreviousOwnerLabel(client: SecureClientDetail): string {
+  return formatOwnerDisplayName(client.previous_owner);
+}
 
 function resolveOwnerLabel(
   client: SecureClientDetail,
@@ -549,7 +541,9 @@ function ClientDetail() {
 
                         "text-[10px] px-1.5 py-0.5 rounded border",
 
-                        leadStatusStyles[client.lead_status] ??
+                        LEAD_STATUS_BADGE_STYLES[
+                          client.lead_status as LeadStatus
+                        ] ??
 
                           "bg-muted/30 text-muted-foreground border-border",
 
@@ -668,6 +662,11 @@ function ClientDetail() {
             />
 
             <DetailField
+              label="Previous Owner"
+              value={resolvePreviousOwnerLabel(client)}
+            />
+
+            <DetailField
 
               label="Total Calls"
 
@@ -697,7 +696,7 @@ function ClientDetail() {
 
               label="Last Assignment"
 
-              value={formatClientDate(client.last_assignment)}
+              value={formatClientDateTime(client.last_assignment)}
 
             />
 

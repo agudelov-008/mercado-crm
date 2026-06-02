@@ -6,9 +6,6 @@
 --
 -- Documentación completa: supabase/docs/provisioning-asesores.md
 --
--- Aplicar:
---   supabase db push
---   o pegar este archivo en Supabase Dashboard → SQL Editor → Run
 -- =============================================================================
 
 CREATE OR REPLACE FUNCTION public.create_agent_with_user(
