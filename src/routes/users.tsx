@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useApp } from "@/lib/app-context";
+import { canAccessUserManagement, getProfileRoleLabel } from "@/lib/role-rbac";
 import {
   countClientsByOwnerIds,
   createAgentWithUser,
@@ -23,6 +24,7 @@ import {
   updateAgentProfile,
   type AgentFormInput,
   type AgentUpdateInput,
+  type ProvisionableTeamRole,
   type TeamProfile,
 } from "@/lib/user-management";
 import { AgentPortfolioModal } from "@/components/AgentPortfolioModal";
@@ -46,6 +48,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/users")({ component: UsersPage });
@@ -57,7 +66,14 @@ const EMPTY_CREATE: AgentFormInput = {
   lastName: "",
   email: "",
   password: "",
+  role: "Agent",
 };
+
+const CREATE_ROLE_OPTIONS: { value: ProvisionableTeamRole; label: string }[] = [
+  { value: "Agent", label: "Asesor" },
+  { value: "Manager", label: "CRM" },
+  { value: "Assistant", label: "Asistente" },
+];
 
 function profileName(row: TeamProfile): string {
   const name = [row.first_name, row.last_name].filter(Boolean).join(" ").trim();
@@ -119,7 +135,7 @@ function UsersPage() {
     );
   }
 
-  if (profileRole !== "Admin") {
+  if (!canAccessUserManagement(profileRole)) {
     return <AccessDenied />;
   }
 
@@ -157,13 +173,15 @@ function UsersCrud() {
   const createMutation = useMutation({
     mutationFn: () => createAgentWithUser(createForm),
     onSuccess: () => {
-      toast.success("Asesor y cuenta de acceso creados correctamente.");
+      toast.success("Miembro del equipo y cuenta de acceso creados correctamente.");
       setCreateForm(EMPTY_CREATE);
       setCreateOpen(false);
       invalidateAgentQueries();
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Error al crear el asesor.");
+      toast.error(
+        err instanceof Error ? err.message : "Error al crear el miembro del equipo.",
+      );
     },
   });
 
@@ -253,8 +271,8 @@ function UsersCrud() {
           </h1>
           <p className="text-sm text-muted-foreground">
             {isLoading
-              ? "Cargando asesores…"
-              : `${agents.length} asesor${agents.length === 1 ? "" : "es"} · rol Agent`}
+              ? "Cargando miembros del equipo…"
+              : `${agents.length} miembro${agents.length === 1 ? "" : "s"} del equipo`}
           </p>
         </div>
         <Button
@@ -267,7 +285,7 @@ function UsersCrud() {
           disabled={isSaving}
         >
           <Plus className="h-4 w-4 mr-2" />
-          Agregar Asesor
+          Agregar Miembro del Equipo
         </Button>
       </div>
 
@@ -276,7 +294,7 @@ function UsersCrud() {
           <table className="w-full text-sm">
             <thead className="bg-surface-elevated/60 text-xs uppercase tracking-wider text-muted-foreground">
               <tr>
-                <th className="text-left px-4 py-3 font-medium">Asesor</th>
+                <th className="text-left px-4 py-3 font-medium">Miembro</th>
                 <th className="text-left px-4 py-3 font-medium">Rol</th>
                 <th className="text-right px-4 py-3 font-medium">Clientes</th>
                 <th className="text-left px-4 py-3 font-medium">Correo</th>
@@ -295,14 +313,16 @@ function UsersCrud() {
               {isError && !isLoading && (
                 <tr>
                   <td colSpan={5} className="px-4 py-8 text-center text-destructive">
-                    {error instanceof Error ? error.message : "Error al cargar asesores."}
+                    {error instanceof Error
+                      ? error.message
+                      : "Error al cargar miembros del equipo."}
                   </td>
                 </tr>
               )}
               {!isLoading && !isError && agents.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
-                    No hay asesores registrados. Crea el primero con el botón superior.
+                    No hay miembros registrados. Crea el primero con el botón superior.
                   </td>
                 </tr>
               )}
@@ -323,7 +343,7 @@ function UsersCrud() {
                     </td>
                     <td className="px-4 py-3">
                       <span className="text-[10px] px-1.5 py-0.5 rounded border bg-info/15 text-info border-info/30">
-                        Agent
+                        {getProfileRoleLabel(agent.role)}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums font-medium">
@@ -384,10 +404,33 @@ function UsersCrud() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Briefcase className="h-4 w-4 text-primary" />
-              Nuevo Asesor (Agent)
+              Nuevo miembro del equipo
             </DialogTitle>
           </DialogHeader>
           <form onSubmit={handleCreateSubmit} className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="member-form-role">Rol</Label>
+              <Select
+                value={createForm.role}
+                onValueChange={(value) =>
+                  updateCreateField("role", value as ProvisionableTeamRole)
+                }
+              >
+                <SelectTrigger
+                  id="member-form-role"
+                  className="bg-surface-elevated border-border"
+                >
+                  <SelectValue placeholder="Seleccionar rol" />
+                </SelectTrigger>
+                <SelectContent>
+                  {CREATE_ROLE_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <AgentFormFields
               firstName={createForm.firstName}
               lastName={createForm.lastName}
@@ -416,7 +459,7 @@ function UsersCrud() {
                 ) : (
                   <>
                     <User className="h-4 w-4" />
-                    Crear asesor
+                    Crear miembro
                   </>
                 )}
               </Button>

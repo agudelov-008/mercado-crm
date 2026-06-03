@@ -17,6 +17,20 @@ export type ProfileRole =
   | "Agent"
   | "Affiliate";
 
+const PROFILE_ROLES: readonly ProfileRole[] = [
+  "Admin",
+  "Manager",
+  "Assistant",
+  "Agent",
+  "Affiliate",
+] as const;
+
+function parseProfileRole(value: unknown): ProfileRole | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim() as ProfileRole;
+  return PROFILE_ROLES.includes(normalized) ? normalized : null;
+}
+
 interface ProfileData {
   email: string;
   first_name: string | null;
@@ -91,7 +105,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       if (!isMounted) return;
 
-      setProfileRole(profile?.role ?? "Agent");
+      setProfileRole(parseProfileRole(profile?.role));
       setAffiliateName(profile?.affiliate_name?.trim() || null);
       setCurrentUser({
         name: fullName,
@@ -130,3 +144,5 @@ export function useApp() {
   if (!ctx) throw new Error("useApp must be used within AppProvider");
   return ctx;
 }
+
+export { getProfileRoleLabel } from "@/lib/role-rbac";

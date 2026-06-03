@@ -21,7 +21,17 @@ serve(async (req) => {
       });
     }
 
-    const { email, password, firstName, lastName } = await req.json();
+    const { email, password, firstName, lastName, role: requestedRole } =
+      await req.json();
+
+    const PROVISIONABLE_ROLES = ["Agent", "Manager", "Assistant"] as const;
+    const assignedRole =
+      typeof requestedRole === "string" &&
+      PROVISIONABLE_ROLES.includes(
+        requestedRole as (typeof PROVISIONABLE_ROLES)[number],
+      )
+        ? requestedRole
+        : "Agent";
 
     const supabaseAdmin = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
@@ -48,7 +58,7 @@ serve(async (req) => {
       .maybeSingle();
 
     if (callerProfile?.role !== "Admin") {
-      throw new Error("Solo administradores pueden crear asesores");
+      throw new Error("Solo administradores pueden crear miembros del equipo");
     }
 
     const { data: newUser, error: authError } =
@@ -59,7 +69,7 @@ serve(async (req) => {
         user_metadata: {
           first_name: firstName,
           last_name: lastName ?? "",
-          role: "Agent",
+          role: assignedRole,
         },
       });
 
@@ -72,7 +82,7 @@ serve(async (req) => {
       .update({
         first_name: firstName,
         last_name: lastName ?? null,
-        role: "Agent",
+        role: assignedRole,
       })
       .eq("id", newUser.user.id);
 

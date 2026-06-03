@@ -284,7 +284,8 @@ export function ClientActivityPanel({
 
   const canCreateNotes = canCreateActivityNotes(profileRole);
   const canManageLogs = canManageActivityLogs(profileRole);
-  const isAgentViewer = profileRole === "Agent";
+  const isFieldOperatorViewer =
+    profileRole === "Agent" || profileRole === "Assistant";
   const activityQueryKey = ["activity-logs", resolvedPhone, profile?.id] as const;
   const isActivityQueryEnabled = !!profile && resolvedPhone.length > 0;
 
@@ -442,10 +443,10 @@ export function ClientActivityPanel({
           </p>
         )}
 
-        {isAgentViewer && (
+        {isFieldOperatorViewer && (
           <p className="text-xs text-muted-foreground shrink-0 rounded-lg border border-info/30 bg-info/10 px-3 py-2">
-            Puedes consultar todo el historial de auditoría y registrar nuevas notas. No
-            puedes editar ni eliminar actividades pasadas.
+            Puedes consultar el historial y registrar nuevas notas. No puedes editar ni
+            eliminar actividades pasadas.
           </p>
         )}
 

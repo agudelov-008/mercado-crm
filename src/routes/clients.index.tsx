@@ -4,9 +4,11 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
   ArrowDown,
   ArrowUp,
+  Download,
   ExternalLink,
   FileUp,
   Loader2,
+  Pencil,
   Phone,
   Plus,
   UserCog,
@@ -18,7 +20,6 @@ import {
   bulkUpdateClientOwner,
   bulkUpdateLeadStatus,
   clientDetailIdFromPhone,
-  CLIENT_TABLE_COLUMNS,
   type ClientTableColumnDef,
   EMPTY_FILTERS,
   fetchSecureClients,
@@ -55,9 +56,21 @@ import {
 import { CallModal } from "@/components/CallModal";
 import { ClientImportModal } from "@/components/ClientImportModal";
 import { ManualClientModal } from "@/components/ManualClientModal";
+import { MaskedContactText } from "@/components/MaskedContactText";
+import { WhatsAppActionButton } from "@/components/WhatsAppActionButton";
+import { useContactUiMasking } from "@/lib/contact-masking";
+import { downloadClientsExcel } from "@/lib/client-export";
 import { cn } from "@/lib/utils";
-import { useApp, type ProfileRole } from "@/lib/app-context";
+import { useApp } from "@/lib/app-context";
 import { useAuth } from "@/lib/auth-context";
+import {
+  canAddManualClient,
+  canAssignClients,
+  canEditClientProfile,
+  canExportClientsToExcel,
+  canImportClientBases,
+  getVisibleClientTableColumns,
+} from "@/lib/role-rbac";
 
 export const Route = createFileRoute("/clients/")({ component: ClientsPage });
 
@@ -86,24 +99,6 @@ const STATUS_COLUMNS: SecureClientColumn[] = [
   "lead_status",
   "previous_lead_status",
 ];
-
-const RESTRICTED_COLUMNS_FOR_FIELD_ROLES: SecureClientColumn[] = [
-  "owner_id",
-  "previous_owner_id",
-];
-
-function getVisibleColumns(profileRole: ProfileRole | null): ClientTableColumnDef[] {
-  if (profileRole === "Agent" || profileRole === "Affiliate") {
-    return CLIENT_TABLE_COLUMNS.filter(
-      (col) => !RESTRICTED_COLUMNS_FOR_FIELD_ROLES.includes(col.key),
-    );
-  }
-  return CLIENT_TABLE_COLUMNS;
-}
-
-function canManageClients(profileRole: ProfileRole | null): boolean {
-  return profileRole === "Admin" || profileRole === "Manager";
-}
 
 function getCellValue(row: SecureClientWithOwners, column: SecureClientColumn): string {
   if (column === "owner_id") {
@@ -282,12 +277,18 @@ function ClientsPage() {
   const profileId = user?.id;
   const isProfileReady = !!profileId && profileRole !== null && !isAuthLoading;
   const isAgent = profileRole === "Agent";
-  const canManage = canManageClients(profileRole);
+  const maskContact = useContactUiMasking();
+  const canAssign = canAssignClients(profileRole);
+  const canEditProfile = canEditClientProfile(profileRole);
+  const canImport = canImportClientBases(profileRole);
+  const canAddManual = canAddManualClient(profileRole);
+  const canExport = canExportClientsToExcel(profileRole);
   const visibleColumns = useMemo(
-    () => getVisibleColumns(profileRole),
+    () => getVisibleClientTableColumns(profileRole),
     [profileRole],
   );
-  const tableColSpan = visibleColumns.length + (canManage ? 2 : 1);
+  const tableColSpan = visibleColumns.length + (canAssign ? 2 : 1);
+  const [isExporting, setIsExporting] = useState(false);
   const [filters, setFilters] = useState<SecureClientFilters>(EMPTY_FILTERS);
   const [sort, setSort] = useState<SecureClientSort | null>(null);
   const [selectedPhones, setSelectedPhones] = useState<Set<string>>(new Set());
@@ -321,7 +322,7 @@ function ClientsPage() {
   const { data: agentOptions = [], isLoading: agentsLoading } = useQuery({
     queryKey: ["agent-profiles-bulk-assign"],
     queryFn: fetchAgentsForOwnerSelect,
-    enabled: isProfileReady && canManage,
+    enabled: isProfileReady && canAssign,
     staleTime: 60_000,
   });
 
@@ -446,11 +447,30 @@ function ClientsPage() {
     bulkOwnerMutation.mutate({ phones, ownerId: bulkAssignAgentId });
   };
 
-  const openClientDetail = (phone: string) => {
+  const openClientDetail = (phone: string, options?: { edit?: boolean }) => {
     navigate({
       to: "/clients/$id",
       params: { id: clientDetailIdFromPhone(phone) },
+      search: options?.edit ? { edit: "1" } : {},
     });
+  };
+
+  const handleExportExcel = () => {
+    if (!canExport || !profileRole || clients.length === 0) {
+      if (clients.length === 0) toast.error("No hay clientes para exportar.");
+      return;
+    }
+    setIsExporting(true);
+    try {
+      downloadClientsExcel(clients, profileRole);
+      toast.success("Archivo Excel generado.");
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "No se pudo exportar el archivo.",
+      );
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   return (
@@ -466,8 +486,24 @@ function ClientsPage() {
                 : `${clients.length} cuenta${clients.length === 1 ? "" : "s"} (vista segura)`}
           </p>
         </div>
-        {canManage && (
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          {canExport && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleExportExcel}
+              disabled={isLoadingClients || isExporting || clients.length === 0}
+              className="border-border"
+            >
+              {isExporting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4" />
+              )}
+              Exportar a Excel
+            </Button>
+          )}
+          {canAddManual && (
             <Button
               type="button"
               variant="outline"
@@ -477,6 +513,8 @@ function ClientsPage() {
               <Plus className="h-4 w-4" />
               Agregar Cliente
             </Button>
+          )}
+          {canImport && (
             <Button
               type="button"
               onClick={() => setImportOpen(true)}
@@ -485,11 +523,11 @@ function ClientsPage() {
               <FileUp className="h-4 w-4" />
               Importar Excel / CSV
             </Button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
-      {canManage && multiSelected && (
+      {canAssign && multiSelected && (
         <div className="sticky top-0 z-20 rounded-xl border border-primary/40 bg-primary/10 backdrop-blur px-4 py-3 flex flex-wrap items-center justify-between gap-3 shadow-elegant">
           <p className="text-sm font-medium">
             {selectedPhones.size} clientes seleccionados
@@ -557,7 +595,7 @@ function ClientsPage() {
           <table className="w-full text-sm min-w-[1800px]">
             <thead className="bg-surface-elevated/60 text-xs uppercase tracking-wider text-muted-foreground">
               <tr>
-                {canManage && (
+                {canAssign && (
                   <th
                     data-bulk-select-cell
                     className="w-10 px-3 py-3"
@@ -592,7 +630,7 @@ function ClientsPage() {
                 </th>
               </tr>
               <tr className="border-t border-border/60 normal-case tracking-normal">
-                {canManage && <th className="px-3 py-1.5 w-10" />}
+                {canAssign && <th className="px-3 py-1.5 w-10" />}
                 {visibleColumns.map((col) => (
                   <th
                     key={`filter-${col.key}`}
@@ -682,7 +720,7 @@ function ClientsPage() {
                         isSelected && "bg-primary/5",
                       )}
                     >
-                      {canManage && (
+                      {canAssign && (
                         <td
                           data-bulk-select-cell
                           className="px-3 py-3 w-10"
@@ -693,28 +731,48 @@ function ClientsPage() {
                             onCheckedChange={() => toggleRow(row.phone)}
                             onClick={(e) => e.stopPropagation()}
                             disabled={isBulkProcessing}
-                            aria-label={`Seleccionar ${row.phone}`}
+                            aria-label={`Seleccionar cliente`}
                           />
                         </td>
                       )}
-                      {visibleColumns.map((col) => (
-                        <td
-                          key={`${row.phone}-${col.key}`}
-                          className="px-3 py-3 whitespace-nowrap max-w-[200px] truncate"
-                          title={getCellValue(row, col.key)}
-                        >
-                          {STATUS_COLUMNS.includes(col.key) &&
-                          row[col.key] ? (
-                            renderStatusBadge(String(row[col.key]))
-                          ) : col.key === "total_calls" ? (
-                            <span className="tabular-nums font-medium">
-                              {getCellValue(row, col.key)}
-                            </span>
-                          ) : (
-                            getCellValue(row, col.key)
-                          )}
-                        </td>
-                      ))}
+                      {visibleColumns.map((col) => {
+                        const isContactCol =
+                          col.key === "phone" || col.key === "email";
+                        const cellTitle = maskContact && isContactCol
+                          ? undefined
+                          : getCellValue(row, col.key);
+
+                        return (
+                          <td
+                            key={`${row.phone}-${col.key}`}
+                            className={cn(
+                              "px-3 py-3 whitespace-nowrap max-w-[200px] truncate",
+                              maskContact && isContactCol && "select-none",
+                            )}
+                            title={cellTitle}
+                          >
+                            {STATUS_COLUMNS.includes(col.key) && row[col.key] ? (
+                              renderStatusBadge(String(row[col.key]))
+                            ) : col.key === "phone" || col.key === "email" ? (
+                              <MaskedContactText
+                                kind={col.key}
+                                value={
+                                  col.key === "phone"
+                                    ? row.phone
+                                    : row.email
+                                }
+                                mono={col.key === "phone"}
+                              />
+                            ) : col.key === "total_calls" ? (
+                              <span className="tabular-nums font-medium">
+                                {getCellValue(row, col.key)}
+                              </span>
+                            ) : (
+                              getCellValue(row, col.key)
+                            )}
+                          </td>
+                        );
+                      })}
                       <td className="px-4 py-3">
                         <div className="flex justify-end items-center gap-1.5 flex-wrap">
                           <Button
@@ -730,6 +788,21 @@ function ClientsPage() {
                             <ExternalLink className="h-3.5 w-3.5" />
                             Ver detalle
                           </Button>
+                          {canEditProfile && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-8 text-xs border-border bg-surface-elevated/60 hover:bg-surface-elevated text-foreground"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openClientDetail(row.phone, { edit: true });
+                              }}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                              Editar
+                            </Button>
+                          )}
                           <button
                             type="button"
                             onClick={(e) => {
@@ -741,6 +814,13 @@ function ClientsPage() {
                           >
                             <Phone className="h-3.5 w-3.5" />
                           </button>
+                          {isAgent && (
+                            <WhatsAppActionButton
+                              phone={row.phone}
+                              variant="compact"
+                              onBeforeOpen={(e) => e.stopPropagation()}
+                            />
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -802,11 +882,11 @@ function ClientsPage() {
         onOpenChange={(o) => !o && setCallClient(null)}
         client={callClient}
       />
-      {canManage && (
-        <>
-          <ClientImportModal open={importOpen} onOpenChange={setImportOpen} />
-          <ManualClientModal open={manualOpen} onOpenChange={setManualOpen} />
-        </>
+      {canImport && (
+        <ClientImportModal open={importOpen} onOpenChange={setImportOpen} />
+      )}
+      {canAddManual && (
+        <ManualClientModal open={manualOpen} onOpenChange={setManualOpen} />
       )}
     </div>
   );

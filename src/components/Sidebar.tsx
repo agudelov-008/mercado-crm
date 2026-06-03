@@ -2,33 +2,40 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import {
   LayoutDashboard,
   Users,
-  CheckSquare,
+  CalendarDays,
   Shield,
   TrendingUp,
   Building2,
 } from "lucide-react";
 import { useApp } from "@/lib/app-context";
-
-const baseNav = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/clients", label: "My Clients", icon: Users },
-  { to: "/tasks", label: "Tasks", icon: CheckSquare },
-];
+import {
+  canAccessAffiliatesModule,
+  canAccessDashboardNav,
+  canAccessTasksNav,
+  canAccessUserManagement,
+} from "@/lib/role-rbac";
 
 export function Sidebar() {
   const { profileRole } = useApp();
   const pathname = useRouterState({ select: (r) => r.location.pathname });
 
-  const isAffiliate = profileRole === "Affiliate";
+  const nav: { to: string; label: string; icon: typeof LayoutDashboard }[] = [];
 
-  const nav = isAffiliate
-    ? [{ to: "/clients", label: "My Clients", icon: Users }]
-    : [...baseNav];
+  if (canAccessDashboardNav(profileRole)) {
+    nav.push({ to: "/", label: "Dashboard", icon: LayoutDashboard });
+  }
 
-  if (profileRole === "Admin") {
+  nav.push({ to: "/clients", label: "My Clients", icon: Users });
+
+  if (canAccessTasksNav(profileRole)) {
+    nav.push({ to: "/tasks", label: "Calendario", icon: CalendarDays });
+  }
+
+  if (canAccessUserManagement(profileRole)) {
     nav.push({ to: "/users", label: "User Management", icon: Shield });
   }
-  if (!isAffiliate && profileRole === "Admin") {
+
+  if (canAccessAffiliatesModule(profileRole)) {
     nav.push({ to: "/affiliates", label: "Afiliadoras", icon: Building2 });
   }
 

@@ -1,6 +1,7 @@
-import { Phone, MessageCircle } from "lucide-react";
+import { Phone } from "lucide-react";
 import type { Client } from "@/lib/mock-data";
 import { formatCurrency } from "@/lib/mock-data";
+import { WhatsAppIcon } from "@/components/WhatsAppIcon";
 
 const tierStyles: Record<string, string> = {
   Conservative: "bg-info/15 text-info border-info/30",
@@ -13,9 +14,17 @@ interface Props {
   onCall: () => void;
   onMessage: () => void;
   onOpen: () => void;
+  /** Solo Agent ve el botón de WhatsApp; otros roles lo ocultan. */
+  showMessageButton?: boolean;
 }
 
-export function ClientCard({ client, onCall, onMessage, onOpen }: Props) {
+export function ClientCard({
+  client,
+  onCall,
+  onMessage,
+  onOpen,
+  showMessageButton = true,
+}: Props) {
   const progress = Math.min(100, (client.portfolioValue / client.targetInvestment) * 100);
   return (
     <div className="group rounded-xl border border-border bg-gradient-surface p-4 hover:border-primary/40 hover:shadow-elegant transition-all animate-fade-in-up">
@@ -57,12 +66,16 @@ export function ClientCard({ client, onCall, onMessage, onOpen }: Props) {
           >
             <Phone className="h-4 w-4" /> Llamar
           </button>
-          <button
-            onClick={onMessage}
-            className="h-10 px-4 rounded-md bg-info/15 hover:bg-info/25 text-info border border-info/30 transition-all flex items-center gap-2 text-sm font-medium"
-          >
-            <MessageCircle className="h-4 w-4" /> Escribir
-          </button>
+          {showMessageButton && (
+            <button
+              type="button"
+              onClick={onMessage}
+              className="h-10 px-4 rounded-md bg-[#25D366]/15 hover:bg-[#25D366]/25 text-[#25D366] border border-[#25D366]/35 transition-all flex items-center gap-2 text-sm font-medium hover:shadow-[0_0_20px_rgba(37,211,102,0.28)]"
+              aria-label="Abrir WhatsApp"
+            >
+              <WhatsAppIcon className="h-4 w-4" /> WhatsApp
+            </button>
+          )}
         </div>
       </div>
     </div>

@@ -6,7 +6,7 @@ import { supabase } from "@/lib/supabase";
  */
 export const LEAD_STATUS_OPTIONS = [
   "Call Again",
-  "Potentital",
+  "Potential",
   "Follow-Up",
   "Voicemail",
   "No Answer",
@@ -31,7 +31,7 @@ const DEFAULT_LEAD_STATUS: LeadStatus = "New";
 /** Estilos de badge por estado (tabla y detalle). */
 export const LEAD_STATUS_BADGE_STYLES: Record<LeadStatus, string> = {
   New: "bg-info/15 text-info border-info/30",
-  Potentital: "bg-primary/15 text-primary border-primary/30",
+  Potential: "bg-primary/15 text-primary border-primary/30",
   "Follow-Up": "bg-warning/15 text-warning border-warning/30",
   "Call Again": "bg-warning/15 text-warning border-warning/30",
   Voicemail: "bg-muted/30 text-muted-foreground border-border",
@@ -53,9 +53,9 @@ export const LEAD_STATUS_BADGE_STYLES: Record<LeadStatus, string> = {
 const LEAD_STATUS_ALIAS_TO_ENUM: Record<string, LeadStatus> = {
   new: "New",
   nuevo: "New",
-  potential: "Potentital",
-  potencial: "Potentital",
-  potentital: "Potentital",
+  potential: "Potential",
+  potencial: "Potential",
+  potentital: "Potential",
   "follow-up": "Follow-Up",
   "follow up": "Follow-Up",
   followup: "Follow-Up",

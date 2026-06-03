@@ -57,7 +57,7 @@ const STEPS = [
   { id: 4, label: "Importar" },
 ] as const;
 
-const ADMIN_ROLES = new Set(["Admin", "Manager", "Assistant"]);
+const ADMIN_ROLES = new Set(["Admin"]);
 
 type MappingPhase = "columns" | "intra";
 

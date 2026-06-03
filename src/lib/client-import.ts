@@ -536,6 +536,64 @@ export async function insertManualClient(row: DbClientRow): Promise<void> {
   }
 }
 
+/** Resultado de actualizar un cliente (incluye teléfono final tras posible cambio de PK). */
+export interface UpdateSecureClientResult {
+  phone: string;
+  phoneChanged: boolean;
+}
+
+/**
+ * Actualiza un cliente existente.
+ * `originalPhone` filtra el registro; `updates.phone` es el valor nuevo (puede cambiar la PK).
+ */
+export async function updateSecureClient(
+  originalPhone: string,
+  updates: DbClientRow,
+): Promise<UpdateSecureClientResult> {
+  try {
+    const normalizedOriginal = normalizePhone(originalPhone);
+    if (!normalizedOriginal) {
+      throw new Error("Teléfono de cliente inválido.");
+    }
+
+    const payload = sanitizeDbClientRow(updates);
+    if (!payload.phone) {
+      throw new Error("El teléfono es obligatorio.");
+    }
+
+    if (payload.phone !== normalizedOriginal) {
+      const exists = await isClientPhoneRegistered(payload.phone);
+      if (exists) {
+        throw new Error(
+          "Este número de teléfono ya está registrado en el CRM.",
+        );
+      }
+    }
+
+    const { error } = await supabase
+      .from("clients")
+      .update(payload)
+      .eq("phone", normalizedOriginal);
+
+    if (error) {
+      throw new Error(
+        error.message.includes("lead_status")
+          ? `${error.message} (valor enviado: "${payload.lead_status}")`
+          : error.message,
+      );
+    }
+
+    return {
+      phone: payload.phone,
+      phoneChanged: payload.phone !== normalizedOriginal,
+    };
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "No se pudo actualizar el cliente.";
+    throw new Error(message);
+  }
+}
+
 export async function fetchAffiliateOptions(): Promise<string[]> {
   try {
     const { data, error } = await supabase

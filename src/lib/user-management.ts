@@ -10,11 +10,24 @@ export interface TeamProfile {
   created_at: string | null;
 }
 
+/** Roles que Admin puede aprovisionar desde User Management. */
+export type ProvisionableTeamRole = Extract<
+  ProfileRole,
+  "Agent" | "Manager" | "Assistant"
+>;
+
+export const PROVISIONABLE_TEAM_ROLES: readonly ProvisionableTeamRole[] = [
+  "Agent",
+  "Manager",
+  "Assistant",
+] as const;
+
 export interface AgentFormInput {
   firstName: string;
   lastName: string;
   email: string;
   password: string;
+  role: ProvisionableTeamRole;
 }
 
 export interface AgentUpdateInput {
@@ -54,7 +67,7 @@ export async function fetchAgentProfiles(): Promise<TeamProfile[]> {
     const { data, error } = await supabase
       .from("profiles")
       .select("id, email, first_name, last_name, role, created_at")
-      .eq("role", "Agent")
+      .in("role", [...PROVISIONABLE_TEAM_ROLES])
       .order("first_name", { ascending: true });
 
     if (error) throw error;
@@ -102,37 +115,49 @@ export async function createAgentWithUser(data: AgentFormInput): Promise<void> {
     const lastName = data.lastName.trim();
     const email = data.email.trim();
     const password = data.password;
+    const role = data.role;
 
     if (!firstName) throw new Error("El nombre es obligatorio.");
     if (!email) throw new Error("El correo electrónico es obligatorio.");
     if (!password) throw new Error("La contraseña temporal es obligatoria.");
 
-    const { error: rpcError } = await supabase.rpc("create_agent_with_user", {
-      user_email: email,
-      user_password: password,
-      user_first_name: firstName,
-      user_last_name: lastName || null,
-    });
+    const invokeCreateAgent = () =>
+      supabase.functions.invoke("create-agent", {
+        body: {
+          email,
+          password,
+          firstName,
+          lastName: lastName || null,
+          role,
+        },
+      });
 
-    if (!rpcError) return;
+    if (role === "Agent") {
+      const { error: rpcError } = await supabase.rpc("create_agent_with_user", {
+        user_email: email,
+        user_password: password,
+        user_first_name: firstName,
+        user_last_name: lastName || null,
+      });
 
-    const { error: fnError } = await supabase.functions.invoke("create-agent", {
-      body: {
-        email,
-        password,
-        firstName,
-        lastName: lastName || null,
-      },
-    });
+      if (!rpcError) return;
 
-    if (fnError) {
-      throw rpcError.code === "PGRST202"
-        ? fnError
-        : rpcError;
+      const { error: fnError } = await invokeCreateAgent();
+
+      if (fnError) {
+        throw rpcError.code === "PGRST202" ? fnError : rpcError;
+      }
+      return;
     }
+
+    const { error: fnError } = await invokeCreateAgent();
+
+    if (fnError) throw fnError;
   } catch (err) {
     const message =
-      err instanceof Error ? err.message : "No se pudo crear el asesor y su cuenta de acceso.";
+      err instanceof Error
+        ? err.message
+        : "No se pudo crear el miembro del equipo y su cuenta de acceso.";
     throw new Error(message);
   }
 }
@@ -206,7 +231,7 @@ export async function updateAgentProfile(
         email,
       })
       .eq("id", agentId)
-      .eq("role", "Agent");
+      .in("role", [...PROVISIONABLE_TEAM_ROLES]);
 
     if (profileError) throw profileError;
 
@@ -266,7 +291,7 @@ export async function deleteAgentProfile(agentId: string): Promise<void> {
       .from("profiles")
       .delete()
       .eq("id", agentId)
-      .eq("role", "Agent");
+      .in("role", [...PROVISIONABLE_TEAM_ROLES]);
 
     if (deleteError) throw deleteError;
   } catch (err) {

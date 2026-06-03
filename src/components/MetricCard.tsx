@@ -26,8 +26,17 @@ export function MetricCard({ label, value, delta, up, icon: Icon, accent = "prim
           <div className="text-xs uppercase tracking-wider text-muted-foreground">{label}</div>
           <div className="text-3xl font-semibold mt-2 tabular-nums">{value}</div>
           {delta && (
-            <div className={`flex items-center gap-1 text-xs mt-2 font-medium ${up ? "text-success" : "text-destructive"}`}>
-              {up ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+            <div
+              className={`flex items-center gap-1 text-xs mt-2 font-medium ${
+                up === undefined
+                  ? "text-muted-foreground"
+                  : up
+                    ? "text-success"
+                    : "text-destructive"
+              }`}
+            >
+              {up === true && <TrendingUp className="h-3 w-3" />}
+              {up === false && <TrendingDown className="h-3 w-3" />}
               {delta}
             </div>
           )}

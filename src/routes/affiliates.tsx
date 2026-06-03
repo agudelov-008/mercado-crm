@@ -12,6 +12,7 @@ import {
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import { useApp } from "@/lib/app-context";
+import { canAccessAffiliatesModule } from "@/lib/role-rbac";
 import { formatClientDate } from "@/lib/secure-clients";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -309,7 +310,7 @@ function AffiliatesPage() {
     );
   }
 
-  if (profileRole !== "Admin") {
+  if (!canAccessAffiliatesModule(profileRole)) {
     return <AccessDenied />;
   }
 
