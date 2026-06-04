@@ -7,6 +7,7 @@ import {
   Loader2,
   Plus,
 } from "lucide-react";
+import { useAuth } from "@/lib/auth-context";
 import { useApp } from "@/lib/app-context";
 import {
   appointmentsQueryOptions,
@@ -17,6 +18,7 @@ import {
   isAppointmentsReadOnly,
 } from "@/lib/appointment-rbac";
 import {
+  buildAppointmentAccess,
   fetchAppointmentsForMonth,
   formatAppointmentTime,
   getAppointmentClientName,
@@ -39,8 +41,10 @@ function monthKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
 
-function CalendarPage() {
-  const { profileRole } = useApp();
+export function CalendarPage() {
+  const { profileRole, affiliateName } = useApp();
+  const { user, isLoading: isAuthLoading } = useAuth();
+  const isAffiliate = profileRole === "Affiliate";
   const canManage = canManageAppointments(profileRole);
   const readOnly = isAppointmentsReadOnly(profileRole);
 
@@ -56,9 +60,28 @@ function CalendarPage() {
 
   useAppointmentsRealtime();
 
+  const appointmentAccess =
+    profileRole && user?.id
+      ? buildAppointmentAccess(profileRole, user.id, affiliateName)
+      : undefined;
+
+  const appointmentsQueryEnabled =
+    profileRole !== null &&
+    !!user?.id &&
+    !isAuthLoading &&
+    (!isAffiliate || !!affiliateName);
+
   const { data: appointments = [], isLoading } = useQuery({
-    queryKey: ["appointments", monthKey(currentMonth)],
-    queryFn: () => fetchAppointmentsForMonth(currentMonth),
+    queryKey: [
+      "appointments",
+      monthKey(currentMonth),
+      profileRole,
+      user?.id,
+      affiliateName,
+    ],
+    queryFn: () =>
+      fetchAppointmentsForMonth(currentMonth, appointmentAccess),
+    enabled: appointmentsQueryEnabled,
     ...appointmentsQueryOptions,
   });
 

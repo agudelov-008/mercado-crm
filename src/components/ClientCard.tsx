@@ -14,8 +14,10 @@ interface Props {
   onCall: () => void;
   onMessage: () => void;
   onOpen: () => void;
-  /** Solo Agent ve el botón de WhatsApp; otros roles lo ocultan. */
+  /** Solo Admin y Asistente ven el botón de WhatsApp. */
   showMessageButton?: boolean;
+  /** Oculto para Afiliadora. */
+  showCallButton?: boolean;
 }
 
 export function ClientCard({
@@ -24,6 +26,7 @@ export function ClientCard({
   onMessage,
   onOpen,
   showMessageButton = true,
+  showCallButton = true,
 }: Props) {
   const progress = Math.min(100, (client.portfolioValue / client.targetInvestment) * 100);
   return (
@@ -60,12 +63,15 @@ export function ClientCard({
         </div>
 
         <div className="flex gap-2 shrink-0">
-          <button
-            onClick={onCall}
-            className="h-10 px-4 rounded-md bg-success/15 hover:bg-success/25 text-success border border-success/30 transition-all flex items-center gap-2 text-sm font-medium hover:shadow-[0_0_20px_oklch(0.68_0.17_155_/_0.3)]"
-          >
-            <Phone className="h-4 w-4" /> Llamar
-          </button>
+          {showCallButton && (
+            <button
+              type="button"
+              onClick={onCall}
+              className="h-10 px-4 rounded-md bg-success/15 hover:bg-success/25 text-success border border-success/30 transition-all flex items-center gap-2 text-sm font-medium hover:shadow-[0_0_20px_oklch(0.68_0.17_155_/_0.3)]"
+            >
+              <Phone className="h-4 w-4" /> Llamar
+            </button>
+          )}
           {showMessageButton && (
             <button
               type="button"

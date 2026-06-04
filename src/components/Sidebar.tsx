@@ -4,10 +4,10 @@ import {
   Users,
   CalendarDays,
   Shield,
-  TrendingUp,
   Building2,
 } from "lucide-react";
 import { useApp } from "@/lib/app-context";
+import { BRAND_LOGO_SOLO, BRAND_NAME, BRAND_TAGLINE } from "@/lib/brand";
 import {
   canAccessAffiliatesModule,
   canAccessDashboardNav,
@@ -28,7 +28,7 @@ export function Sidebar() {
   nav.push({ to: "/clients", label: "My Clients", icon: Users });
 
   if (canAccessTasksNav(profileRole)) {
-    nav.push({ to: "/tasks", label: "Calendario", icon: CalendarDays });
+    nav.push({ to: "/calendar", label: "Calendario", icon: CalendarDays });
   }
 
   if (canAccessUserManagement(profileRole)) {
@@ -41,13 +41,19 @@ export function Sidebar() {
 
   return (
     <aside className="hidden md:flex w-60 shrink-0 flex-col border-r border-border bg-surface/40">
-      <div className="flex items-center gap-2 px-5 h-16 border-b border-border">
-        <div className="h-9 w-9 rounded-lg bg-gradient-primary flex items-center justify-center shadow-glow">
-          <TrendingUp className="h-5 w-5 text-primary-foreground" />
-        </div>
-        <div className="leading-tight">
-          <div className="text-sm font-semibold tracking-tight">Quant Capital</div>
-          <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Wealth CRM</div>
+      <div className="flex items-center gap-2.5 px-5 h-16 border-b border-border">
+        <img
+          src={BRAND_LOGO_SOLO}
+          alt={`${BRAND_NAME} isotipo`}
+          className="h-9 w-9 object-contain shrink-0"
+        />
+        <div className="leading-tight min-w-0">
+          <div className="text-sm font-semibold tracking-tight truncate">
+            {BRAND_NAME}
+          </div>
+          <div className="text-[10px] text-muted-foreground uppercase tracking-wider">
+            {BRAND_TAGLINE}
+          </div>
         </div>
       </div>
       <nav className="flex-1 px-3 py-4 space-y-1">
@@ -70,16 +76,6 @@ export function Sidebar() {
           );
         })}
       </nav>
-      <div className="p-4 border-t border-border">
-        <div className="rounded-lg bg-gradient-surface border border-border p-3">
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Market Status</div>
-          <div className="flex items-center gap-2 mt-1">
-            <span className="h-2 w-2 rounded-full bg-success animate-pulse-dot" />
-            <span className="text-xs font-medium">Open · NYSE</span>
-          </div>
-          <div className="text-[10px] text-muted-foreground mt-1">Closes in 3h 47m</div>
-        </div>
-      </div>
     </aside>
   );
 }

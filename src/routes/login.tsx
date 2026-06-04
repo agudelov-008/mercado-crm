@@ -1,11 +1,12 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Building2, Globe, Lock, Mail } from "lucide-react";
+import { Lock, Mail } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/lib/supabase";
+import { BRAND_LOGO_FULL, BRAND_NAME } from "@/lib/brand";
 
 export const Route = createFileRoute("/login")({
   component: LoginPage,
@@ -45,20 +46,20 @@ function LoginPage() {
   return (
     <div className="h-screen w-full flex overflow-hidden">
       {/* Lado Izquierdo (Branding) */}
-      <aside className="hidden lg:flex w-1/2 flex-col bg-gradient-to-br from-slate-950 via-[oklch(0.18_0.035_255)] to-[oklch(0.22_0.05_270)] relative">
+      <aside className="hidden lg:flex w-1/2 flex-col bg-gradient-to-br from-[oklch(0.08_0.01_265)] via-[oklch(0.11_0.008_265)] to-[oklch(0.14_0.012_88)] relative">
 
         {/* Contenedor central con el logo, título y texto */}
         <div className="flex-1 flex flex-col items-center justify-center text-center px-12 relative z-10">
 
           {/* Logo masivo usando valores exactos en píxeles para forzar el tamaño */}
           <img
-            src="/no_background_logo.png"
-            alt="Quant Capital Logo"
+            src={BRAND_LOGO_FULL}
+            alt={`${BRAND_NAME} logo`}
             className="w-[300px] md:w-[400px] lg:w-[500px] xl:w-[550px] h-auto object-contain drop-shadow-2xl"
           />
 
           <p className="mt-2 text-sm text-muted-foreground max-w-sm leading-relaxed">
-            Institutional-grade client intelligence, portfolio oversight, and compliance workflows for wealth advisors.
+            Premium client intelligence and advisor workflows — {BRAND_NAME}.
           </p>
 
         </div>
@@ -73,8 +74,8 @@ function LoginPage() {
         {/* Logo en versión móvil (visible solo en pantallas pequeñas) */}
         <div className="lg:hidden p-6 border-b border-border flex justify-center">
           <img
-            src="/no_background_logo.png"
-            alt="Quant Capital Logo"
+            src={BRAND_LOGO_FULL}
+            alt={`${BRAND_NAME} logo`}
             className="h-12 w-auto"
           />
         </div>
@@ -99,7 +100,7 @@ function LoginPage() {
                     id="email"
                     type="email"
                     name="email"
-                    placeholder="you@quantcapital.com"
+                    placeholder="you@fiveelements.com"
                     required
                     autoComplete="email"
                     className="pl-9 bg-slate-800/50 border-slate-700 text-foreground placeholder:text-muted-foreground"
@@ -133,40 +134,6 @@ function LoginPage() {
                 {isSubmitting ? "Signing In..." : "Sign In"}
               </Button>
             </form>
-
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <span className="w-full border-t border-border" />
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-background px-2 text-muted-foreground">Or continue with</span>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <Button
-                type="button"
-                variant="outline"
-                className="bg-slate-800/30 border-slate-700 hover:bg-slate-800/60"
-                onClick={() => {
-                  toast.info("Proveedor Google disponible pronto.");
-                }}
-              >
-                <Globe className="h-4 w-4" />
-                Google
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                className="bg-slate-800/30 border-slate-700 hover:bg-slate-800/60"
-                onClick={() => {
-                  toast.info("Proveedor Microsoft disponible pronto.");
-                }}
-              >
-                <Building2 className="h-4 w-4" />
-                Microsoft
-              </Button>
-            </div>
           </div>
         </div>
       </main>

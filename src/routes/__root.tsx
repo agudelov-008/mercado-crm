@@ -8,6 +8,7 @@ import {
 } from "@tanstack/react-router";
 
 import appCss from "../styles.css?url";
+import { BRAND_LOGO_SOLO, BRAND_NAME, BRAND_TAGLINE } from "@/lib/brand";
 import { AppProvider } from "@/lib/app-context";
 import { AuthGate, AuthProvider } from "@/lib/auth-context";
 import { AppShell } from "@/components/AppShell";
@@ -18,15 +19,12 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Quant Capital — Wealth CRM" },
-      { name: "description", content: "Premium CRM for stock market & wealth management professionals." },
+      { title: `${BRAND_NAME} — ${BRAND_TAGLINE}` },
+      { name: "description", content: "Premium CRM for wealth advisors — Five Elements." },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
-      {
-        rel: "icon",
-        href: "data:image/svg+xml,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><text y=\".9em\" font-size=\"90\">🐂</text></svg>",
-      },
+      { rel: "icon", type: "image/png", href: BRAND_LOGO_SOLO },
     ],
   }),
   shellComponent: RootShell,

@@ -1,8 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
   ArrowDown,
+  ArrowLeft,
+  ArrowRight,
   ArrowUp,
   Download,
   ExternalLink,
@@ -14,12 +16,13 @@ import {
   UserCog,
 } from "lucide-react";
 import { toast } from "sonner";
-import type { Client } from "@/lib/mock-data";
 import { fetchAgentsForOwnerSelect } from "@/lib/user-management";
 import {
   bulkUpdateClientOwner,
   bulkUpdateLeadStatus,
+  CLIENT_PAGE_SIZE_OPTIONS,
   clientDetailIdFromPhone,
+  type ClientPageSize,
   type ClientTableColumnDef,
   EMPTY_FILTERS,
   fetchSecureClients,
@@ -53,7 +56,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { CallModal } from "@/components/CallModal";
+import { initiateLocalPhoneCall } from "@/lib/local-call";
 import { ClientImportModal } from "@/components/ClientImportModal";
 import { ManualClientModal } from "@/components/ManualClientModal";
 import { MaskedContactText } from "@/components/MaskedContactText";
@@ -63,37 +66,19 @@ import { downloadClientsExcel } from "@/lib/client-export";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/lib/app-context";
 import { useAuth } from "@/lib/auth-context";
+import { CountryDisplay } from "@/lib/country-flags";
 import {
   canAddManualClient,
   canAssignClients,
   canEditClientProfile,
   canExportClientsToExcel,
   canImportClientBases,
+  canInitiateClientCall,
+  canMessageClients,
   getVisibleClientTableColumns,
 } from "@/lib/role-rbac";
 
 export const Route = createFileRoute("/clients/")({ component: ClientsPage });
-
-function secureClientToModalClient(row: SecureClient): Client {
-  const name =
-    [row.first_name, row.last_name].filter(Boolean).join(" ").trim() ||
-    row.phone;
-  return {
-    id: row.phone,
-    name,
-    email: row.email ?? "",
-    phone: row.phone,
-    tier: "Moderate",
-    portfolioValue: 0,
-    targetInvestment: 1,
-    netWorthBracket: "",
-    kyc: "Pending",
-    interests: [],
-    assignedAgent: "",
-    lastContact: row.last_contacted ?? "",
-    avatarColor: "#10b981",
-  };
-}
 
 const STATUS_COLUMNS: SecureClientColumn[] = [
   "lead_status",
@@ -277,6 +262,8 @@ function ClientsPage() {
   const profileId = user?.id;
   const isProfileReady = !!profileId && profileRole !== null && !isAuthLoading;
   const isAgent = profileRole === "Agent";
+  const canOpenWhatsApp = canMessageClients(profileRole);
+  const canCall = canInitiateClientCall(profileRole);
   const maskContact = useContactUiMasking();
   const canAssign = canAssignClients(profileRole);
   const canEditProfile = canEditClientProfile(profileRole);
@@ -295,27 +282,42 @@ function ClientsPage() {
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkStatus, setBulkStatus] = useState<LeadStatus>("New");
   const [bulkAssignAgentId, setBulkAssignAgentId] = useState<string>("");
-  const [callClient, setCallClient] = useState<Client | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState<ClientPageSize>(24);
+
+  useEffect(() => {
+    setPage(0);
+  }, [filters, sort, pageSize]);
 
   const queryKey = useMemo(
-    () => ["secure-clients", profileId, filters, sort] as const,
-    [profileId, filters, sort],
+    () => ["secure-clients", profileId, filters, sort, page, pageSize] as const,
+    [profileId, filters, sort, page, pageSize],
   );
 
   const {
-    data: clients = [],
+    data: clientsPage,
     isPending,
     isFetching,
     isError,
     error,
   } = useQuery({
     queryKey,
-    queryFn: () => fetchSecureClients(filters, sort),
+    queryFn: () => fetchSecureClients(filters, sort, { page, pageSize }),
     enabled: isProfileReady,
     staleTime: 30_000,
   });
+
+  const clients = clientsPage?.rows ?? [];
+  const totalCount = clientsPage?.totalCount ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const pageFrom = totalCount === 0 ? 0 : page * pageSize + 1;
+  const pageTo = Math.min((page + 1) * pageSize, totalCount);
+
+  useEffect(() => {
+    setPage((p) => Math.min(p, Math.max(0, totalPages - 1)));
+  }, [totalPages]);
 
   const isLoadingClients = !isProfileReady || isPending || isFetching;
 
@@ -336,11 +338,16 @@ function ClientsPage() {
     }) => bulkUpdateClientOwner(phones, ownerId),
     onMutate: async ({ phones, ownerId }) => {
       await queryClient.cancelQueries({ queryKey });
-      const previous = queryClient.getQueryData<SecureClientWithOwners[]>(queryKey);
-      queryClient.setQueryData<SecureClientWithOwners[]>(queryKey, (old) =>
-        old?.map((row) =>
-          phones.includes(row.phone) ? { ...row, owner_id: ownerId } : row,
-        ),
+      const previous = queryClient.getQueryData<typeof clientsPage>(queryKey);
+      queryClient.setQueryData<typeof clientsPage>(queryKey, (old) =>
+        old
+          ? {
+              ...old,
+              rows: old.rows.map((row) =>
+                phones.includes(row.phone) ? { ...row, owner_id: ownerId } : row,
+              ),
+            }
+          : old,
       );
       return { previous };
     },
@@ -374,13 +381,18 @@ function ClientsPage() {
     }) => bulkUpdateLeadStatus(phones, leadStatus),
     onMutate: async ({ phones, leadStatus }) => {
       await queryClient.cancelQueries({ queryKey });
-      const previous = queryClient.getQueryData<SecureClientWithOwners[]>(queryKey);
-      queryClient.setQueryData<SecureClientWithOwners[]>(queryKey, (old) =>
-        old?.map((row) =>
-          phones.includes(row.phone)
-            ? { ...row, lead_status: leadStatus }
-            : row,
-        ),
+      const previous = queryClient.getQueryData<typeof clientsPage>(queryKey);
+      queryClient.setQueryData<typeof clientsPage>(queryKey, (old) =>
+        old
+          ? {
+              ...old,
+              rows: old.rows.map((row) =>
+                phones.includes(row.phone)
+                  ? { ...row, lead_status: leadStatus }
+                  : row,
+              ),
+            }
+          : old,
       );
       return { previous };
     },
@@ -482,8 +494,12 @@ function ClientsPage() {
             {isLoadingClients
               ? "Cargando clientes…"
               : isAgent
-                ? `${clients.length} cliente${clients.length === 1 ? "" : "s"} en tu cartera`
-                : `${clients.length} cuenta${clients.length === 1 ? "" : "s"} (vista segura)`}
+                ? totalCount === 0
+                  ? "Sin clientes en tu cartera"
+                  : `Mostrando ${pageFrom}–${pageTo} de ${totalCount} cliente${totalCount === 1 ? "" : "s"} en tu cartera`
+                : totalCount === 0
+                  ? "Sin cuentas"
+                  : `Mostrando ${pageFrom}–${pageTo} de ${totalCount} cuenta${totalCount === 1 ? "" : "s"} (vista segura)`}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 shrink-0">
@@ -579,6 +595,57 @@ function ClientsPage() {
           </div>
         </div>
       )}
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <span>Clientes por página</span>
+          <Select
+            value={String(pageSize)}
+            onValueChange={(v) => setPageSize(Number(v) as ClientPageSize)}
+            disabled={isLoadingClients}
+          >
+            <SelectTrigger className="h-9 w-[88px] bg-surface-elevated border-border">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {CLIENT_PAGE_SIZE_OPTIONS.map((size) => (
+                <SelectItem key={size} value={String(size)}>
+                  {size}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {!isLoadingClients && totalCount > 0 && (
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-9 w-9 p-0"
+              disabled={page <= 0 || isBulkProcessing}
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              aria-label="Página anterior"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+            <span className="text-sm text-muted-foreground tabular-nums min-w-[120px] text-center">
+              Página {page + 1} de {totalPages}
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-9 w-9 p-0"
+              disabled={page >= totalPages - 1 || isBulkProcessing}
+              onClick={() => setPage((p) => p + 1)}
+              aria-label="Página siguiente"
+            >
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
+      </div>
 
       <div className="relative rounded-xl border border-border bg-card/40 overflow-hidden">
         {isBulkProcessing && (
@@ -685,7 +752,6 @@ function ClientsPage() {
               {!isLoadingClients &&
                 !isError &&
                 clients.map((row) => {
-                  const modalClient = secureClientToModalClient(row);
                   const isSelected = selectedPhones.has(row.phone);
                   return (
                     <tr
@@ -767,6 +833,8 @@ function ClientsPage() {
                               <span className="tabular-nums font-medium">
                                 {getCellValue(row, col.key)}
                               </span>
+                            ) : col.key === "country" ? (
+                              <CountryDisplay country={row.country} />
                             ) : (
                               getCellValue(row, col.key)
                             )}
@@ -803,18 +871,20 @@ function ClientsPage() {
                               Editar
                             </Button>
                           )}
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setCallClient(modalClient);
-                            }}
-                            className="h-8 w-8 rounded-md bg-success/15 hover:bg-success/25 text-success border border-success/30 flex items-center justify-center"
-                            aria-label="Llamar"
-                          >
-                            <Phone className="h-3.5 w-3.5" />
-                          </button>
-                          {isAgent && (
+                          {canCall && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                initiateLocalPhoneCall(row.phone);
+                              }}
+                              className="h-8 w-8 rounded-md bg-success/15 hover:bg-success/25 text-success border border-success/30 flex items-center justify-center"
+                              aria-label="Llamar"
+                            >
+                              <Phone className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                          {canOpenWhatsApp && (
                             <WhatsAppActionButton
                               phone={row.phone}
                               variant="compact"
@@ -830,6 +900,57 @@ function ClientsPage() {
           </table>
         </div>
       </div>
+
+      {!isLoadingClients && totalCount > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-muted-foreground tabular-nums">
+            {pageFrom}–{pageTo} de {totalCount} cliente{totalCount === 1 ? "" : "s"}
+          </p>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">Por página</span>
+            <Select
+              value={String(pageSize)}
+              onValueChange={(v) => setPageSize(Number(v) as ClientPageSize)}
+            >
+              <SelectTrigger className="h-9 w-[88px] bg-surface-elevated border-border">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {CLIENT_PAGE_SIZE_OPTIONS.map((size) => (
+                  <SelectItem key={size} value={String(size)}>
+                    {size}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-9 w-9 p-0"
+              disabled={page <= 0}
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              aria-label="Página anterior"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+            <span className="text-sm text-muted-foreground tabular-nums">
+              {page + 1} / {totalPages}
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-9 w-9 p-0"
+              disabled={page >= totalPages - 1}
+              onClick={() => setPage((p) => p + 1)}
+              aria-label="Página siguiente"
+            >
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      )}
 
       <Dialog open={bulkOpen} onOpenChange={setBulkOpen}>
         <DialogContent className="max-w-md bg-card border-border">
@@ -877,11 +998,6 @@ function ClientsPage() {
         </DialogContent>
       </Dialog>
 
-      <CallModal
-        open={!!callClient}
-        onOpenChange={(o) => !o && setCallClient(null)}
-        client={callClient}
-      />
       {canImport && (
         <ClientImportModal open={importOpen} onOpenChange={setImportOpen} />
       )}

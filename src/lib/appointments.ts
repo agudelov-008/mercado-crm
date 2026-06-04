@@ -1,3 +1,4 @@
+import type { ProfileRole } from "@/lib/app-context";
 import { supabase } from "@/lib/supabase";
 
 export interface AppointmentClient {
@@ -30,19 +31,60 @@ export interface UpdateAppointmentInput {
   starts_at?: string;
 }
 
-const APPOINTMENT_SELECT = `
+const APPOINTMENT_COLUMNS = `
   id,
   client_phone,
   title,
   description,
   starts_at,
   created_at,
-  created_by,
-  clients (
-    first_name,
-    last_name
-  )
+  created_by
 `;
+
+/** Admin, CRM (Manager) y Asistente ven todas las citas sin filtro por dueño. */
+export function isUnrestrictedAppointmentRole(role: ProfileRole): boolean {
+  return role === "Admin" || role === "Manager" || role === "Assistant";
+}
+
+export type AppointmentAccess = {
+  role: ProfileRole;
+  authUserId: string;
+  /** `profiles.affiliate_name` — filtra `clients.affiliate` para rol Affiliate. */
+  affiliateName: string | null;
+};
+
+export function buildAppointmentAccess(
+  role: ProfileRole,
+  authUserId: string,
+  affiliateName: string | null,
+): AppointmentAccess {
+  return {
+    role,
+    authUserId,
+    affiliateName: affiliateName?.trim() || null,
+  };
+}
+
+function appointmentSelectForAccess(access?: AppointmentAccess): string {
+  const clientEmbed = access && !isUnrestrictedAppointmentRole(access.role) && access.role !== "Affiliate"
+    ? "clients!inner"
+    : "clients";
+  return `${APPOINTMENT_COLUMNS}, ${clientEmbed} (first_name, last_name)`;
+}
+
+function applyAppointmentClientScope<
+  Q extends { eq: (column: string, value: string) => Q },
+>(query: Q, access?: AppointmentAccess): Q {
+  if (!access || isUnrestrictedAppointmentRole(access.role)) return query;
+  if (access.role === "Agent") {
+    return query.eq("clients.owner_id", access.authUserId);
+  }
+  return query;
+}
+
+function affiliateAppointmentsUnavailable(access?: AppointmentAccess): boolean {
+  return access?.role === "Affiliate" && !access.affiliateName;
+}
 
 function normalizeClient(
   clients: Appointment["clients"],
@@ -98,18 +140,24 @@ function dayRange(day: Date): { from: string; to: string } {
 
 export async function fetchAppointmentsForDay(
   day: Date = new Date(),
+  access?: AppointmentAccess,
 ): Promise<Appointment[]> {
   try {
+    if (affiliateAppointmentsUnavailable(access)) return [];
+
     const { from, to } = dayRange(day);
-    const { data, error } = await supabase
+    let query = supabase
       .from("appointments")
-      .select(APPOINTMENT_SELECT)
+      .select(appointmentSelectForAccess(access))
       .gte("starts_at", from)
-      .lte("starts_at", to)
-      .order("starts_at", { ascending: true });
+      .lte("starts_at", to);
+
+    query = applyAppointmentClientScope(query, access);
+
+    const { data, error } = await query.order("starts_at", { ascending: true });
 
     if (error) throw error;
-    return (data ?? []) as Appointment[];
+    return (data ?? []) as unknown as Appointment[];
   } catch (err) {
     const message =
       err instanceof Error
@@ -210,18 +258,26 @@ export function getCalendarDays(month: Date): Date[] {
   return days;
 }
 
-export async function fetchAppointmentsForMonth(month: Date): Promise<Appointment[]> {
+export async function fetchAppointmentsForMonth(
+  month: Date,
+  access?: AppointmentAccess,
+): Promise<Appointment[]> {
   try {
+    if (affiliateAppointmentsUnavailable(access)) return [];
+
     const { from, to } = monthRange(month);
-    const { data, error } = await supabase
+    let query = supabase
       .from("appointments")
-      .select(APPOINTMENT_SELECT)
+      .select(appointmentSelectForAccess(access))
       .gte("starts_at", from)
-      .lte("starts_at", to)
-      .order("starts_at", { ascending: true });
+      .lte("starts_at", to);
+
+    query = applyAppointmentClientScope(query, access);
+
+    const { data, error } = await query.order("starts_at", { ascending: true });
 
     if (error) throw error;
-    return (data ?? []) as Appointment[];
+    return (data ?? []) as unknown as Appointment[];
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "No se pudieron cargar las citas.";
@@ -231,16 +287,24 @@ export async function fetchAppointmentsForMonth(month: Date): Promise<Appointmen
 
 export async function fetchAppointmentsByPhone(
   phone: string,
+  access?: AppointmentAccess,
 ): Promise<Appointment[]> {
   try {
-    const { data, error } = await supabase
+    const trimmedPhone = phone.trim();
+    if (!trimmedPhone) return [];
+    if (affiliateAppointmentsUnavailable(access)) return [];
+
+    let query = supabase
       .from("appointments")
-      .select(APPOINTMENT_SELECT)
-      .eq("client_phone", phone)
-      .order("starts_at", { ascending: true });
+      .select(appointmentSelectForAccess(access))
+      .eq("client_phone", trimmedPhone);
+
+    query = applyAppointmentClientScope(query, access);
+
+    const { data, error } = await query.order("starts_at", { ascending: true });
 
     if (error) throw error;
-    return (data ?? []) as Appointment[];
+    return (data ?? []) as unknown as Appointment[];
   } catch (err) {
     const message =
       err instanceof Error
@@ -263,11 +327,11 @@ export async function createAppointment(
         starts_at: input.starts_at,
         created_by: input.created_by ?? null,
       })
-      .select(APPOINTMENT_SELECT)
+      .select(appointmentSelectForAccess())
       .single();
 
     if (error) throw error;
-    return data as Appointment;
+    return data as unknown as Appointment;
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "No se pudo crear la cita.";
@@ -291,11 +355,11 @@ export async function updateAppointment(
       .from("appointments")
       .update(payload)
       .eq("id", id)
-      .select(APPOINTMENT_SELECT)
+      .select(appointmentSelectForAccess())
       .single();
 
     if (error) throw error;
-    return data as Appointment;
+    return data as unknown as Appointment;
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "No se pudo actualizar la cita.";

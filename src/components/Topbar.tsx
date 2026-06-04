@@ -1,6 +1,7 @@
-import { Bell, Search, ChevronDown, LogOut } from "lucide-react";
+import { Search, ChevronDown, LogOut } from "lucide-react";
 import { useApp } from "@/lib/app-context";
 import { useAuth } from "@/lib/auth-context";
+import { BRAND_LOGO_SOLO, BRAND_NAME } from "@/lib/brand";
 import { getProfileRoleLabel } from "@/lib/role-rbac";
 import {
   DropdownMenu,
@@ -20,11 +21,17 @@ export function Topbar() {
     profileRole !== null ? getProfileRoleLabel(profileRole) : "…";
 
   return (
-    <header className="h-16 border-b border-border bg-surface/60 backdrop-blur flex items-center px-6 gap-4">
+    <header className="h-16 border-b border-border bg-surface/60 backdrop-blur flex items-center px-4 md:px-6 gap-4">
+      <img
+        src={BRAND_LOGO_SOLO}
+        alt={`${BRAND_NAME} isotipo`}
+        className="h-8 w-8 object-contain shrink-0 md:hidden"
+      />
+
       <div className="relative flex-1 max-w-md">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
-          placeholder="Search clients, deals, tickers…"
+          placeholder="Search clients, deals…"
           className="pl-9 bg-surface-elevated border-border h-9"
         />
       </div>
@@ -34,15 +41,6 @@ export function Topbar() {
           <span className="h-2 w-2 rounded-full bg-primary" />
           <span className="font-medium">{roleLabel}</span>
         </div>
-
-        <button
-          type="button"
-          className="relative h-9 w-9 rounded-md bg-surface-elevated border border-border hover:border-primary/50 flex items-center justify-center transition-colors"
-          aria-label="Notificaciones"
-        >
-          <Bell className="h-4 w-4" />
-          <span className="absolute top-2 right-2 h-1.5 w-1.5 rounded-full bg-success" />
-        </button>
 
         <DropdownMenu>
           <DropdownMenuTrigger className="flex items-center gap-2 pl-3 border-l border-border outline-none">

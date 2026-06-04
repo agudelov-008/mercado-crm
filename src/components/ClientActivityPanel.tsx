@@ -27,7 +27,6 @@ import {
 import {
   canCreateActivityNotes,
   canManageActivityLogs,
-  canViewActivityHistory,
 } from "@/lib/activity-rbac";
 import {
   AlertDialog,
@@ -263,18 +262,29 @@ function ActivityTimelineItem({
   );
 }
 
+/** Datos de historial provistos por la ruta de detalle (evita doble fetch y gates por rol). */
+export interface ClientActivityPanelQueryState {
+  activities: ActivityLog[];
+  isPending: boolean;
+  isError: boolean;
+  error: unknown;
+}
+
 interface ClientActivityPanelProps {
   /** Teléfono canónico desde `client.phone` (BD), no el parámetro crudo de la URL. */
   clientPhone: string | null | undefined;
   className?: string;
+  /** Cuando está definido, el panel solo renderiza estos datos (lectura/escritura sin consulta interna). */
+  activitiesQuery?: ClientActivityPanelQueryState;
 }
 
 export function ClientActivityPanel({
   clientPhone,
   className,
+  activitiesQuery,
 }: ClientActivityPanelProps) {
   const { profileRole } = useApp();
-  const { user: profile, isLoading: isAuthLoading } = useAuth();
+  const { user, isLoading: isAuthLoading } = useAuth();
   const queryClient = useQueryClient();
   const [noteText, setNoteText] = useState("");
   const [pendingLogId, setPendingLogId] = useState<string | null>(null);
@@ -284,34 +294,55 @@ export function ClientActivityPanel({
 
   const canCreateNotes = canCreateActivityNotes(profileRole);
   const canManageLogs = canManageActivityLogs(profileRole);
+  const isAffiliateViewer = profileRole === "Affiliate";
   const isFieldOperatorViewer =
     profileRole === "Agent" || profileRole === "Assistant";
-  const activityQueryKey = ["activity-logs", resolvedPhone, profile?.id] as const;
-  const isActivityQueryEnabled = !!profile && resolvedPhone.length > 0;
+
+  const useParentActivities = activitiesQuery !== undefined;
+
+  const activityQueryKey = ["activity-logs", resolvedPhone, user?.id] as const;
+
+  const isActivityQueryEnabled =
+    !useParentActivities &&
+    !isAuthLoading &&
+    !!user?.id &&
+    resolvedPhone.length > 0;
 
   const {
-    data: activities = [],
-    isLoading: isActivitiesLoading,
-    isFetching: isActivitiesFetching,
-    isError: isActivitiesError,
-    error: activitiesError,
+    data: internalActivities = [],
+    isPending: isInternalActivitiesPending,
+    isError: isInternalActivitiesError,
+    error: internalActivitiesError,
   } = useQuery({
     queryKey: activityQueryKey,
     queryFn: () => fetchActivityLogsByPhone(resolvedPhone),
     enabled: isActivityQueryEnabled,
+    refetchOnMount: "always",
     staleTime: 15_000,
   });
 
-  const isHistoryPending =
-    isAuthLoading || !isActivityQueryEnabled || isActivitiesLoading || isActivitiesFetching;
+  const activities = useParentActivities
+    ? activitiesQuery.activities
+    : internalActivities;
+  const isActivitiesError = useParentActivities
+    ? activitiesQuery.isError
+    : isInternalActivitiesError;
+  const activitiesError = useParentActivities
+    ? activitiesQuery.error
+    : internalActivitiesError;
+
+  const isHistoryPending = useParentActivities
+    ? activitiesQuery.isPending
+    : isAuthLoading ||
+      (isActivityQueryEnabled && isInternalActivitiesPending);
 
   const noteMutation = useMutation({
     mutationFn: (text: string) => {
       if (!canCreateNotes) throw new Error("No tienes permiso para crear notas.");
-      if (!profile?.id) throw new Error("Sesión no válida.");
+      if (!user?.id) throw new Error("Sesión no válida.");
       return insertActivityLog({
         client_phone: resolvedPhone,
-        agent_id: profile.id,
+        agent_id: user.id,
         text,
         type: "comment",
       });
@@ -436,10 +467,9 @@ export function ClientActivityPanel({
           </>
         )}
 
-        {profileRole === "Affiliate" && (
+        {isAffiliateViewer && (
           <p className="text-xs text-muted-foreground shrink-0 rounded-lg border border-border/60 bg-surface/50 px-3 py-2">
-            Vista de solo lectura: las afiliadoras pueden consultar el historial, pero no
-            crear ni modificar comentarios.
+            Vista de solo lectura: puedes consultar el historial completo de tus leads.
           </p>
         )}
 
@@ -451,13 +481,14 @@ export function ClientActivityPanel({
         )}
 
         <ScrollArea className="flex-1 min-h-[280px] pr-3">
-          {!canViewActivityHistory(profileRole) && (
+          {!useParentActivities && !isAuthLoading && !isActivityQueryEnabled && (
             <p className="text-sm text-muted-foreground py-4 text-center">
-              No tienes permiso para ver este historial.
+              No se pudo iniciar la carga del historial. Verifica tu sesión e intenta de
+              nuevo.
             </p>
           )}
 
-          {canViewActivityHistory(profileRole) && isHistoryPending && (
+          {isHistoryPending && (
             <div className="space-y-4">
               {Array.from({ length: 4 }).map((_, index) => (
                 <div key={index} className="space-y-2">
@@ -468,7 +499,7 @@ export function ClientActivityPanel({
             </div>
           )}
 
-          {canViewActivityHistory(profileRole) && isActivitiesError && !isHistoryPending && (
+          {isActivitiesError && !isHistoryPending && (
             <p className="text-sm text-destructive py-4">
               {activitiesError instanceof Error
                 ? activitiesError.message
@@ -476,20 +507,14 @@ export function ClientActivityPanel({
             </p>
           )}
 
-          {canViewActivityHistory(profileRole) &&
-            !isHistoryPending &&
-            !isActivitiesError &&
-            activities.length === 0 && (
+          {!isHistoryPending && !isActivitiesError && activities.length === 0 && (
             <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
               <MessageSquare className="h-8 w-8 mb-3 opacity-40" />
               <p className="text-sm">Sin actividad registrada aún.</p>
             </div>
           )}
 
-          {canViewActivityHistory(profileRole) &&
-            !isHistoryPending &&
-            !isActivitiesError &&
-            activities.length > 0 && (
+          {!isHistoryPending && !isActivitiesError && activities.length > 0 && (
             <div className="pt-1">
               {activities.map((log) => (
                 <ActivityTimelineItem

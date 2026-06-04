@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as UsersRouteImport } from './routes/users'
 import { Route as TasksRouteImport } from './routes/tasks'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as CalendarRouteImport } from './routes/calendar'
 import { Route as AffiliatesRouteImport } from './routes/affiliates'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ClientsIndexRouteImport } from './routes/clients.index'
@@ -30,6 +31,11 @@ const TasksRoute = TasksRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CalendarRoute = CalendarRouteImport.update({
+  id: '/calendar',
+  path: '/calendar',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AffiliatesRoute = AffiliatesRouteImport.update({
@@ -56,6 +62,7 @@ const ClientsIdRoute = ClientsIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/affiliates': typeof AffiliatesRoute
+  '/calendar': typeof CalendarRoute
   '/login': typeof LoginRoute
   '/tasks': typeof TasksRoute
   '/users': typeof UsersRoute
@@ -65,6 +72,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/affiliates': typeof AffiliatesRoute
+  '/calendar': typeof CalendarRoute
   '/login': typeof LoginRoute
   '/tasks': typeof TasksRoute
   '/users': typeof UsersRoute
@@ -75,6 +83,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/affiliates': typeof AffiliatesRoute
+  '/calendar': typeof CalendarRoute
   '/login': typeof LoginRoute
   '/tasks': typeof TasksRoute
   '/users': typeof UsersRoute
@@ -86,6 +95,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/affiliates'
+    | '/calendar'
     | '/login'
     | '/tasks'
     | '/users'
@@ -95,6 +105,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/affiliates'
+    | '/calendar'
     | '/login'
     | '/tasks'
     | '/users'
@@ -104,6 +115,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/affiliates'
+    | '/calendar'
     | '/login'
     | '/tasks'
     | '/users'
@@ -114,6 +126,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AffiliatesRoute: typeof AffiliatesRoute
+  CalendarRoute: typeof CalendarRoute
   LoginRoute: typeof LoginRoute
   TasksRoute: typeof TasksRoute
   UsersRoute: typeof UsersRoute
@@ -142,6 +155,13 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/calendar': {
+      id: '/calendar'
+      path: '/calendar'
+      fullPath: '/calendar'
+      preLoaderRoute: typeof CalendarRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/affiliates': {
@@ -178,6 +198,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AffiliatesRoute: AffiliatesRoute,
+  CalendarRoute: CalendarRoute,
   LoginRoute: LoginRoute,
   TasksRoute: TasksRoute,
   UsersRoute: UsersRoute,

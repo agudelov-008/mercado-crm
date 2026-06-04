@@ -18,14 +18,14 @@ const templates = [
     label: "WhatsApp Check-in",
     channel: "WhatsApp",
     icon: MessageSquare,
-    body: (c: string) => `Hola ${c}, espero que estés muy bien. Te escribo para coordinar una breve revisión de tu portafolio esta semana. ¿Tienes 15 minutos disponibles?\n\nSaludos,\nQuant Capital`,
+    body: (c: string) => `Hola ${c}, espero que estés muy bien. Te escribo para coordinar una breve revisión de tu portafolio esta semana. ¿Tienes 15 minutos disponibles?\n\nSaludos,\nFive Elements`,
   },
   {
     id: "email-report",
     label: "Market Report Email",
     channel: "Email",
     icon: FileBarChart,
-    body: (c: string) => `Estimado/a ${c},\n\nAdjunto encontrarás nuestro reporte mensual de mercado con el desempeño de tu portafolio y recomendaciones de rebalanceo.\n\nPuntos destacados:\n• Rendimiento YTD: +8.4%\n• Sectores con sobreponderación sugerida\n• Oportunidades en mercados emergentes\n\nQuedo atento a tus comentarios.\n\nAtentamente,\nEquipo Quant Capital`,
+    body: (c: string) => `Estimado/a ${c},\n\nAdjunto encontrarás nuestro reporte mensual de mercado con el desempeño de tu portafolio y recomendaciones de rebalanceo.\n\nPuntos destacados:\n• Rendimiento YTD: +8.4%\n• Sectores con sobreponderación sugerida\n• Oportunidades en mercados emergentes\n\nQuedo atento a tus comentarios.\n\nAtentamente,\nEquipo Five Elements`,
   },
   {
     id: "email-rebalance",

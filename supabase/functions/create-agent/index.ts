@@ -21,8 +21,19 @@ serve(async (req) => {
       });
     }
 
-    const { email, password, firstName, lastName, role: requestedRole } =
-      await req.json();
+    const {
+      email,
+      password,
+      firstName,
+      lastName,
+      role: requestedRole,
+      pbxExtension,
+    } = await req.json();
+
+    const trimmedPbx =
+      typeof pbxExtension === "string"
+        ? pbxExtension.replace(/\D/g, "").trim() || null
+        : null;
 
     const PROVISIONABLE_ROLES = ["Agent", "Manager", "Assistant"] as const;
     const assignedRole =
@@ -83,6 +94,7 @@ serve(async (req) => {
         first_name: firstName,
         last_name: lastName ?? null,
         role: assignedRole,
+        pbx_extension: trimmedPbx,
       })
       .eq("id", newUser.user.id);
 

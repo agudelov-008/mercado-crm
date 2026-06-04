@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { z } from "zod";
 import { toast } from "sonner";
-import type { Client } from "@/lib/mock-data";
+import { useAuth } from "@/lib/auth-context";
 import { useApp } from "@/lib/app-context";
 import {
   bulkUpdateLeadStatus,
@@ -29,16 +29,20 @@ import {
   phoneFromClientDetailId,
   updateClientOwner,
   type LeadStatus,
-  type SecureClient,
   type SecureClientDetail,
 } from "@/lib/secure-clients";
 import { fetchAgentsForOwnerSelect } from "@/lib/user-management";
+import { CountryDisplay } from "@/lib/country-flags";
 import {
   canAssignClients,
   canEditClientProfile,
+  canInitiateClientCall,
+  canMessageClients,
   canUpdateClientLeadStatus,
 } from "@/lib/role-rbac";
-import { CallModal } from "@/components/CallModal";
+import { initiateLocalPhoneCall } from "@/lib/local-call";
+import { fetchActivityLogsByPhone } from "@/lib/activity-logs";
+import { buildAppointmentAccess } from "@/lib/appointments";
 import { ClientEditModal } from "@/components/ClientEditModal";
 import { ClientActivityPanel } from "@/components/ClientActivityPanel";
 import { ClientAppointmentsSection } from "@/components/ClientAppointmentsSection";
@@ -64,27 +68,6 @@ export const Route = createFileRoute("/clients/$id")({
 });
 
 const NONE_OWNER = "__none__";
-
-function secureClientToModalClient(row: SecureClient): Client {
-  const name =
-    [row.first_name, row.last_name].filter(Boolean).join(" ").trim() ||
-    row.phone;
-  return {
-    id: row.phone,
-    name,
-    email: row.email ?? "",
-    phone: row.phone,
-    tier: "Moderate",
-    portfolioValue: 0,
-    targetInvestment: 1,
-    netWorthBracket: row.country ?? "",
-    kyc: "Pending",
-    interests: [],
-    assignedAgent: row.affiliate ?? "",
-    lastContact: row.last_contacted ?? "",
-    avatarColor: "#10b981",
-  };
-}
 
 function DetailField({
   label,
@@ -119,12 +102,14 @@ function ContactDetailField({
   label,
   kind,
   value,
+  unmasked,
 }: {
   label: string;
   kind: "phone" | "email";
   value: string | null | undefined;
+  unmasked?: boolean;
 }) {
-  const maskContact = useContactUiMasking();
+  const maskContact = useContactUiMasking() && !unmasked;
 
   return (
     <div
@@ -137,7 +122,11 @@ function ContactDetailField({
         {label}
       </div>
       <div className="text-sm font-medium mt-1 break-all">
-        <MaskedContactText kind={kind} value={value} mono={kind === "phone"} />
+        {unmasked ? (
+          <span className={cn(kind === "phone" && "font-mono tabular-nums")}>{value ?? "—"}</span>
+        ) : (
+          <MaskedContactText kind={kind} value={value} mono={kind === "phone"} />
+        )}
       </div>
     </div>
   );
@@ -323,22 +312,32 @@ function OwnerAssignmentField({
   );
 }
 
-function ClientDetail() {
+export function ClientDetail() {
   const { id } = Route.useParams();
   const search = Route.useSearch();
-  const { profileRole } = useApp();
+  const { profileRole, affiliateName } = useApp();
+  const { user, isLoading: isAuthLoading } = useAuth();
   const navigate = useNavigate();
   const phone = phoneFromClientDetailId(id);
-  const [callOpen, setCallOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const isProfileReady = !!user?.id && profileRole !== null && !isAuthLoading;
 
-  const maskContact = useContactUiMasking();
+  const isAffiliate = profileRole === "Affiliate";
+  const maskContact = useContactUiMasking() && !isAffiliate;
   const canAssign = canAssignClients(profileRole);
   const canEditProfile = canEditClientProfile(profileRole);
   const canEditStatus = canUpdateClientLeadStatus(profileRole);
-  const isAffiliate = profileRole === "Affiliate";
+  const canOpenWhatsApp = canMessageClients(profileRole);
+  const canCall = canInitiateClientCall(profileRole);
   const isAgent = profileRole === "Agent";
   const isAssistant = profileRole === "Assistant";
+
+  const scopedAccess =
+    profileRole && user?.id
+      ? {
+        appointments: buildAppointmentAccess(profileRole, user.id, affiliateName),
+      }
+      : null;
 
   const {
     data: client,
@@ -346,9 +345,26 @@ function ClientDetail() {
     isError,
     error,
   } = useQuery({
-    queryKey: ["secure-client", phone],
+    queryKey: ["secure-client", phone, user?.id],
     queryFn: () => fetchSecureClientByPhone(phone),
+    enabled: isProfileReady && phone.length > 0,
+    refetchOnMount: true,
     staleTime: 30_000,
+  });
+
+  const activityPhone = phone;
+
+  const {
+    data: activityLogs = [],
+    isPending: isActivityLogsPending,
+    isError: isActivityLogsError,
+    error: activityLogsError,
+  } = useQuery({
+    queryKey: ["activity-logs", activityPhone, user?.id, profileRole, affiliateName],
+    queryFn: () => fetchActivityLogsByPhone(activityPhone),
+    enabled: isProfileReady && activityPhone.length > 0,
+    refetchOnMount: true,
+    staleTime: 15_000,
   });
 
   useEffect(() => {
@@ -362,7 +378,7 @@ function ClientDetail() {
     });
   }, [canEditProfile, search.edit, client, id, navigate]);
 
-  if (profileRole === null) {
+  if (!isProfileReady) {
     return (
       <div className="p-8 flex flex-col items-center justify-center text-muted-foreground gap-3">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -414,7 +430,6 @@ function ClientDetail() {
       .slice(0, 2)
       .map((part) => part[0]?.toUpperCase() ?? "")
       .join("") || "?";
-  const modalClient = secureClientToModalClient(client);
 
   return (
     <div className="p-6 lg:p-8 max-w-[1600px] mx-auto flex flex-col gap-6 min-h-0">
@@ -441,9 +456,9 @@ function ClientDetail() {
                       className={cn(
                         "text-[10px] px-1.5 py-0.5 rounded border",
                         LEAD_STATUS_BADGE_STYLES[
-                          client.lead_status as LeadStatus
+                        client.lead_status as LeadStatus
                         ] ??
-                          "bg-muted/30 text-muted-foreground border-border",
+                        "bg-muted/30 text-muted-foreground border-border",
                       )}
                     >
                       {client.lead_status}
@@ -451,28 +466,18 @@ function ClientDetail() {
                   )}
                 </div>
                 <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-foreground mt-2">
-                  <span
-                    className={cn(
-                      "flex items-center gap-1.5",
-                      maskContact && "select-none",
-                    )}
-                  >
+                  <span className={cn("flex items-center gap-1.5", maskContact && "select-none")}>
                     <Mail className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                    <MaskedContactText kind="email" value={client.email} />
+                    {isAffiliate ? <span>{client.email}</span> : <MaskedContactText kind="email" value={client.email} />}
                   </span>
-                  <span
-                    className={cn(
-                      "flex items-center gap-1.5",
-                      maskContact && "select-none",
-                    )}
-                  >
+                  <span className={cn("flex items-center gap-1.5", maskContact && "select-none")}>
                     <Phone className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                    <MaskedContactText kind="phone" value={client.phone} mono />
+                    {isAffiliate ? <span className="font-mono tabular-nums">{client.phone}</span> : <MaskedContactText kind="phone" value={client.phone} mono />}
                   </span>
                   {client.country && (
                     <span className="flex items-center gap-1.5">
                       <Globe className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                      {client.country}
+                      <CountryDisplay country={client.country} />
                     </span>
                   )}
                 </div>
@@ -483,8 +488,8 @@ function ClientDetail() {
                 )}
                 {isAgent && (
                   <p className="text-xs text-muted-foreground mt-2">
-                    Contacto enmascarado en pantalla. Puedes llamar, abrir WhatsApp,
-                    cambiar estado y registrar notas.
+                    Contacto enmascarado en pantalla. Puedes llamar, cambiar estado y
+                    registrar notas.
                   </p>
                 )}
                 {isAssistant && (
@@ -504,15 +509,17 @@ function ClientDetail() {
                     <Pencil className="h-4 w-4" /> Editar
                   </button>
                 )}
-                <button
-                  type="button"
-                  onClick={() => setCallOpen(true)}
-                  className="h-10 px-4 rounded-md bg-success/15 hover:bg-success/25 text-success border border-success/30 flex items-center gap-2 text-sm font-medium"
-                >
-                  <Phone className="h-4 w-4" /> Llamar
-                </button>
-                {isAgent && (
-                  <WhatsAppActionButton phone={client.phone} />
+                {canCall && (
+                  <button
+                    type="button"
+                    onClick={() => initiateLocalPhoneCall(phone)}
+                    className="h-10 px-4 rounded-md bg-success/15 hover:bg-success/25 text-success border border-success/30 flex items-center gap-2 text-sm font-medium"
+                  >
+                    <Phone className="h-4 w-4" /> Llamar
+                  </button>
+                )}
+                {canOpenWhatsApp && (
+                  <WhatsAppActionButton phone={phone} />
                 )}
               </div>
             </div>
@@ -521,11 +528,18 @@ function ClientDetail() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <DetailField label="First Name" value={client.first_name ?? "—"} />
             <DetailField label="Last Name" value={client.last_name ?? "—"} />
-            <DetailField label="Country" value={client.country ?? "—"} />
+            <div className="p-3 rounded-lg bg-surface border border-border">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                Country
+              </div>
+              <div className="text-sm font-medium mt-1">
+                <CountryDisplay country={client.country} />
+              </div>
+            </div>
             <DetailField label="Affiliate" value={client.affiliate ?? "—"} />
             <DetailField label="TP Account" value={client.tp_account ?? "—"} mono />
-            <ContactDetailField label="Phone" kind="phone" value={client.phone} />
-            <ContactDetailField label="Email" kind="email" value={client.email} />
+            <ContactDetailField label="Phone" kind="phone" value={client.phone} unmasked={isAffiliate} />
+            <ContactDetailField label="Email" kind="email" value={client.email} unmasked={isAffiliate} />
             <LeadStatusField client={client} canEdit={canEditStatus} />
             <OwnerAssignmentField
               client={client}
@@ -568,40 +582,32 @@ function ClientDetail() {
               <User className="h-4 w-4" /> Información de contacto
             </h2>
             <p className="text-xs text-muted-foreground mt-1">
-              {maskContact
-                ? "Datos de contacto enmascarados según tu rol de agente."
-                : "Datos visibles según tu rol y políticas de acceso en Supabase."}
+              {isAffiliate
+                ? "Datos visibles para tu rol de afiliadora."
+                : maskContact
+                  ? "Datos de contacto enmascarados según tu rol de agente."
+                  : "Datos visibles según tu rol y políticas de acceso en Supabase."}
             </p>
             <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div
-                className={cn(
-                  "flex items-start gap-3 p-3 rounded-lg bg-surface border border-border",
-                  maskContact && "select-none",
-                )}
-              >
+              <div className={cn("flex items-start gap-3 p-3 rounded-lg bg-surface border border-border", maskContact && "select-none")}>
                 <Phone className="h-4 w-4 text-success mt-0.5" />
                 <div>
                   <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
                     Teléfono
                   </div>
                   <div className="text-sm font-mono mt-0.5">
-                    <MaskedContactText kind="phone" value={client.phone} mono />
+                    {isAffiliate ? <span>{client.phone}</span> : <MaskedContactText kind="phone" value={client.phone} mono />}
                   </div>
                 </div>
               </div>
-              <div
-                className={cn(
-                  "flex items-start gap-3 p-3 rounded-lg bg-surface border border-border",
-                  maskContact && "select-none",
-                )}
-              >
+              <div className={cn("flex items-start gap-3 p-3 rounded-lg bg-surface border border-border", maskContact && "select-none")}>
                 <Mail className="h-4 w-4 text-info mt-0.5" />
                 <div>
                   <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
                     Correo
                   </div>
                   <div className="text-sm mt-0.5 break-all">
-                    <MaskedContactText kind="email" value={client.email} />
+                    {isAffiliate ? <span>{client.email}</span> : <MaskedContactText kind="email" value={client.email} />}
                   </div>
                 </div>
               </div>
@@ -620,8 +626,9 @@ function ClientDetail() {
           </div>
 
           <ClientAppointmentsSection
-            clientPhone={client.phone}
+            clientPhone={phone}
             clientLabel={displayName}
+            access={scopedAccess?.appointments}
           />
 
           <div className="rounded-xl border border-border bg-card/40 p-5 flex items-center gap-3 text-xs text-muted-foreground">
@@ -635,11 +642,16 @@ function ClientDetail() {
 
         <ClientActivityPanel
           clientPhone={client.phone}
-          className="lg:min-h-[520px]"
+          className="flex-1 min-h-[520px] lg:min-h-[520px] w-full"
+          activitiesQuery={{
+            activities: activityLogs,
+            isPending: isActivityLogsPending,
+            isError: isActivityLogsError,
+            error: activityLogsError,
+          }}
         />
       </div>
 
-      <CallModal open={callOpen} onOpenChange={setCallOpen} client={modalClient} />
       {canEditProfile && (
         <ClientEditModal
           client={client}

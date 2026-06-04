@@ -71,15 +71,32 @@ export async function fetchActivityLogsByPhone(
   phone: string,
 ): Promise<ActivityLog[]> {
   try {
+    const trimmedPhone = phone.trim();
+    if (!trimmedPhone) return [];
+
     const { data, error } = await supabase
       .from("activity_logs")
-      .select(ACTIVITY_LOG_SELECT)
-      .eq("client_phone", phone)
+      .select(`
+        id,
+        client_phone,
+        agent_id,
+        text,
+        type,
+        created_at,
+        profiles (
+          first_name,
+          last_name,
+          email
+        )
+      `)
+      .eq("client_phone", trimmedPhone)
       .order("created_at", { ascending: false });
 
     if (error) throw error;
+
     return (data ?? []) as ActivityLog[];
   } catch (err) {
+    console.error("Error en fetchActivityLogsByPhone:", err);
     const message =
       err instanceof Error
         ? err.message

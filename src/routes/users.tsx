@@ -14,8 +14,16 @@ import {
   Users,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth } from "@/lib/auth-context";
 import { useApp } from "@/lib/app-context";
-import { canAccessUserManagement, getProfileRoleLabel } from "@/lib/role-rbac";
+import {
+  canAccessUserManagement,
+  canCrudTeamUsers,
+  canManageTeamMember,
+  getCreatableTeamRoles,
+  getProfileRoleLabel,
+} from "@/lib/role-rbac";
+import type { ProfileRole } from "@/lib/app-context";
 import {
   countClientsByOwnerIds,
   createAgentWithUser,
@@ -69,11 +77,20 @@ const EMPTY_CREATE: AgentFormInput = {
   role: "Agent",
 };
 
-const CREATE_ROLE_OPTIONS: { value: ProvisionableTeamRole; label: string }[] = [
-  { value: "Agent", label: "Asesor" },
-  { value: "Manager", label: "CRM" },
-  { value: "Assistant", label: "Asistente" },
-];
+const ROLE_OPTION_LABELS: Record<ProvisionableTeamRole, string> = {
+  Agent: "Asesor",
+  Manager: "CRM",
+  Assistant: "Asistente",
+};
+
+function createRoleOptionsForActor(
+  actorRole: ProfileRole,
+): { value: ProvisionableTeamRole; label: string }[] {
+  return getCreatableTeamRoles(actorRole).map((value) => ({
+    value,
+    label: ROLE_OPTION_LABELS[value],
+  }));
+}
 
 function profileName(row: TeamProfile): string {
   const name = [row.first_name, row.last_name].filter(Boolean).join(" ").trim();
@@ -115,7 +132,7 @@ function AccessDenied() {
       <Lock className="h-10 w-10 mx-auto text-muted-foreground" />
       <h2 className="text-xl font-semibold mt-4">Acceso restringido</h2>
       <p className="text-sm text-muted-foreground mt-2">
-        La gestión de usuarios está reservada para administradores del sistema.
+        No tienes permiso para acceder a la gestión de usuarios.
       </p>
       <Button className="mt-4" asChild>
         <Link to="/">Volver al Dashboard</Link>
@@ -126,8 +143,9 @@ function AccessDenied() {
 
 function UsersPage() {
   const { profileRole } = useApp();
+  const { isLoading: isAuthLoading } = useAuth();
 
-  if (profileRole === null) {
+  if (isAuthLoading || profileRole === null) {
     return (
       <div className="flex items-center justify-center min-h-[40vh] text-muted-foreground">
         <Loader2 className="h-6 w-6 animate-spin" />
@@ -139,11 +157,15 @@ function UsersPage() {
     return <AccessDenied />;
   }
 
-  return <UsersCrud />;
+  return <UsersCrud profileRole={profileRole} />;
 }
 
-function UsersCrud() {
+function UsersCrud({ profileRole }: { profileRole: ProfileRole }) {
+  const { user, isLoading: isAuthLoading } = useAuth();
+  const canCrud = canCrudTeamUsers(profileRole);
+  const createRoleOptions = createRoleOptionsForActor(profileRole);
   const queryClient = useQueryClient();
+  const isAgentsQueryReady = !isAuthLoading && !!user?.id && profileRole !== null;
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm, setCreateForm] = useState<AgentFormInput>(EMPTY_CREATE);
   const [editAgent, setEditAgent] = useState<TeamProfile | null>(null);
@@ -157,9 +179,15 @@ function UsersCrud() {
   const [portfolioAgent, setPortfolioAgent] = useState<TeamProfile | null>(null);
 
   const { data: agents = [], isLoading, isError, error } = useQuery({
-    queryKey: AGENTS_QUERY_KEY,
+    queryKey: [...AGENTS_QUERY_KEY, profileRole, user?.id] as const,
     queryFn: fetchAgentsWithCounts,
+    enabled: isAgentsQueryReady,
+    refetchOnMount: true,
     staleTime: 30_000,
+    select: (rows) =>
+      profileRole === "Assistant"
+        ? rows.filter((agent) => agent.role === "Agent")
+        : rows,
   });
 
   const invalidateAgentQueries = () => {
@@ -275,18 +303,21 @@ function UsersCrud() {
               : `${agents.length} miembro${agents.length === 1 ? "" : "s"} del equipo`}
           </p>
         </div>
-        <Button
-          type="button"
-          onClick={() => {
-            setCreateForm(EMPTY_CREATE);
-            setCreateOpen(true);
-          }}
-          className="h-10 px-4 bg-gradient-primary text-primary-foreground shadow-glow"
-          disabled={isSaving}
-        >
-          <Plus className="h-4 w-4 mr-2" />
-          Agregar Miembro del Equipo
-        </Button>
+        {canCrud && (
+          <Button
+            type="button"
+            onClick={() => {
+              const defaultRole = createRoleOptions[0]?.value ?? "Agent";
+              setCreateForm({ ...EMPTY_CREATE, role: defaultRole });
+              setCreateOpen(true);
+            }}
+            className="h-10 px-4 bg-gradient-primary text-primary-foreground shadow-glow"
+            disabled={isSaving}
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Agregar Miembro del Equipo
+          </Button>
+        )}
       </div>
 
       <div className="rounded-xl border border-border bg-card/40 overflow-hidden">
@@ -368,28 +399,32 @@ function UsersCrud() {
                           <Users className="h-3.5 w-3.5" />
                           Gestionar cartera
                         </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="h-8 w-8 p-0"
-                          disabled={isSaving}
-                          onClick={() => openEdit(agent)}
-                          aria-label={`Editar ${profileName(agent)}`}
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="h-8 w-8 p-0 border-destructive/30 text-destructive hover:bg-destructive/10"
-                          disabled={isSaving}
-                          onClick={() => setDeleteTarget(agent)}
-                          aria-label={`Eliminar ${profileName(agent)}`}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
+                        {canManageTeamMember(profileRole, agent.role) && (
+                          <>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-8 w-8 p-0"
+                              disabled={isSaving}
+                              onClick={() => openEdit(agent)}
+                              aria-label={`Editar ${profileName(agent)}`}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-8 w-8 p-0 border-destructive/30 text-destructive hover:bg-destructive/10"
+                              disabled={isSaving}
+                              onClick={() => setDeleteTarget(agent)}
+                              aria-label={`Eliminar ${profileName(agent)}`}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -423,7 +458,7 @@ function UsersCrud() {
                   <SelectValue placeholder="Seleccionar rol" />
                 </SelectTrigger>
                 <SelectContent>
-                  {CREATE_ROLE_OPTIONS.map((option) => (
+                  {createRoleOptions.map((option) => (
                     <SelectItem key={option.value} value={option.value}>
                       {option.label}
                     </SelectItem>

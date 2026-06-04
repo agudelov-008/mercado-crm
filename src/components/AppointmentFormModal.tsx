@@ -1,8 +1,14 @@
 import { useEffect, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { CalendarClock, Loader2, Phone } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { CalendarClock, Hash, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth-context";
+import { supabase } from "@/lib/supabase";
+import {
+  formatOwnerDisplayName,
+  normalizeOwnerProfile,
+  type SecureClientOwnerProfile,
+} from "@/lib/secure-clients";
 import {
   APPOINTMENT_HOUR_OPTIONS,
   APPOINTMENT_MINUTE_OPTIONS,
@@ -31,8 +37,52 @@ interface AppointmentFormModalProps {
   onOpenChange: (open: boolean) => void;
   clientPhone: string;
   clientLabel?: string;
+  /** Asesor de cartera; si no se pasa, se resuelve por teléfono al abrir el modal. */
+  assignedOwner?: SecureClientOwnerProfile | null;
   appointment?: Appointment | null;
   defaultStartsAt?: Date;
+}
+
+const CLIENT_OWNER_SELECT =
+  "owner_id, owner:profiles!owner_id(first_name, last_name, email)";
+
+function ClientAssignedPortfolioField({
+  owner,
+}: {
+  owner: SecureClientOwnerProfile | null | undefined;
+}) {
+  const displayName = formatOwnerDisplayName(owner);
+  const isUnassigned = displayName === "Sin asignar";
+  const fullName = owner
+    ? [owner.first_name, owner.last_name].filter(Boolean).join(" ").trim()
+    : "";
+  const agentDetail =
+    fullName && owner?.email ? `${fullName} / ${owner.email}` : displayName;
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className={cn(
+        "rounded-md border px-3 py-2.5 text-sm leading-snug",
+        isUnassigned
+          ? "border-amber-500/45 bg-amber-500/8 text-amber-100/90"
+          : "border-primary/50 bg-primary/8 text-foreground shadow-[0_0_14px_oklch(0.78_0.12_88_/_0.12)]",
+      )}
+    >
+      {isUnassigned ? (
+        <span>⚠️ Cartera libre (Sin asignar)</span>
+      ) : (
+        <span>
+          <span aria-hidden className="mr-1">
+            💼
+          </span>
+          Cartera asignada a:{" "}
+          <span className="font-medium text-primary">{agentDetail}</span>
+        </span>
+      )}
+    </div>
+  );
 }
 
 function defaultDateParts(defaultStartsAt?: Date): {
@@ -59,12 +109,35 @@ export function AppointmentFormModal({
   onOpenChange,
   clientPhone,
   clientLabel,
+  assignedOwner: assignedOwnerProp,
   appointment,
   defaultStartsAt,
 }: AppointmentFormModalProps) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const isEditing = Boolean(appointment);
+
+  const { data: fetchedOwner, isLoading: isLoadingOwner } = useQuery({
+    queryKey: ["appointment-client-owner", clientPhone],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("secure_clients")
+        .select(CLIENT_OWNER_SELECT)
+        .eq("phone", clientPhone)
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!data) return null;
+      return normalizeOwnerProfile(
+        (data as { owner?: SecureClientOwnerProfile | SecureClientOwnerProfile[] })
+          .owner,
+      );
+    },
+    enabled: open && assignedOwnerProp === undefined && Boolean(clientPhone),
+  });
+
+  const assignedOwner =
+    assignedOwnerProp !== undefined ? assignedOwnerProp : (fetchedOwner ?? null);
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -138,6 +211,15 @@ export function AppointmentFormModal({
         </DialogHeader>
 
         <div className="space-y-4">
+          {isLoadingOwner && assignedOwnerProp === undefined ? (
+            <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Cargando cartera asignada…
+            </p>
+          ) : (
+            <ClientAssignedPortfolioField owner={assignedOwner} />
+          )}
+
           <div className="space-y-1.5">
             <Label htmlFor="appointment-title">Título de la reunión</Label>
             <Input
@@ -238,6 +320,30 @@ export function AppointmentFormModal({
   );
 }
 
+interface AppointmentClientPick {
+  phone: string;
+  first_name: string | null;
+  last_name: string | null;
+  tp_account: string | null;
+  owner_id: string | null;
+  owner?: SecureClientOwnerProfile | SecureClientOwnerProfile[] | null;
+}
+
+const TP_SEARCH_MIN_LENGTH = 2;
+const TP_SEARCH_LIMIT = 10;
+
+function clientDisplayName(client: AppointmentClientPick): string {
+  return [client.first_name, client.last_name].filter(Boolean).join(" ").trim();
+}
+
+function clientFormLabel(client: AppointmentClientPick): string {
+  const name = clientDisplayName(client);
+  const tp = client.tp_account?.trim();
+  if (tp && name) return `${tp} · ${name}`;
+  if (tp) return tp;
+  return name || client.phone;
+}
+
 interface GlobalAppointmentCreateModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -249,22 +355,46 @@ export function GlobalAppointmentCreateModal({
   onOpenChange,
   defaultStartsAt,
 }: GlobalAppointmentCreateModalProps) {
-  const [step, setStep] = useState<"phone" | "form">("phone");
-  const [phone, setPhone] = useState("");
+  const [step, setStep] = useState<"client" | "form">("client");
+  const [typedTP, setTypedTP] = useState("");
+  const [selectedClient, setSelectedClient] = useState<AppointmentClientPick | null>(
+    null,
+  );
 
   useEffect(() => {
     if (!open) {
-      setStep("phone");
-      setPhone("");
+      setStep("client");
+      setTypedTP("");
+      setSelectedClient(null);
     }
   }, [open]);
 
-  if (step === "form" && phone.trim()) {
+  const { data: clientMatches = [], isFetching } = useQuery({
+    queryKey: ["appointment-client-tp-search", typedTP.trim()],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("secure_clients")
+        .select(`phone, first_name, last_name, tp_account, ${CLIENT_OWNER_SELECT}`)
+        .ilike("tp_account", `%${typedTP.trim()}%`)
+        .limit(TP_SEARCH_LIMIT);
+
+      if (error) throw error;
+      return (data ?? []) as AppointmentClientPick[];
+    },
+    enabled: typedTP.trim().length >= TP_SEARCH_MIN_LENGTH,
+  });
+
+  const showMatchesDropdown =
+    typedTP.trim().length >= TP_SEARCH_MIN_LENGTH && clientMatches.length > 0;
+
+  if (step === "form" && selectedClient) {
     return (
       <AppointmentFormModal
         open={open}
         onOpenChange={onOpenChange}
-        clientPhone={phone.trim()}
+        clientPhone={selectedClient.phone}
+        clientLabel={clientFormLabel(selectedClient)}
+        assignedOwner={normalizeOwnerProfile(selectedClient.owner)}
         defaultStartsAt={defaultStartsAt}
       />
     );
@@ -275,24 +405,84 @@ export function GlobalAppointmentCreateModal({
       <DialogContent className="max-w-sm bg-card border-border">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Phone className="h-5 w-5 text-primary" />
+            <Hash className="h-5 w-5 text-primary" />
             Nueva cita
           </DialogTitle>
           <DialogDescription>
-            Ingresa el teléfono del cliente para asociar la cita.
+            Busca al cliente por su código de cuenta TP para asociar la cita.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-1.5">
-          <Label htmlFor="global-appointment-phone">Teléfono del cliente</Label>
+          <Label htmlFor="global-appointment-tp">Cuenta TP (Trader Account)</Label>
           <Input
-            id="global-appointment-phone"
-            type="tel"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            placeholder="+57 300 000 0000"
+            id="global-appointment-tp"
+            value={typedTP}
+            onChange={(e) => {
+              setTypedTP(e.target.value);
+              setSelectedClient(null);
+            }}
+            placeholder="Ej. 12345678"
             className="bg-surface-elevated border-border font-mono"
+            autoComplete="off"
           />
+          {isFetching && typedTP.trim().length >= TP_SEARCH_MIN_LENGTH && (
+            <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Buscando…
+            </p>
+          )}
+          {showMatchesDropdown && (
+            <div
+              className="rounded-md border border-border bg-surface-elevated overflow-hidden max-h-48 overflow-y-auto"
+              role="listbox"
+              aria-label="Clientes coincidentes"
+            >
+              {clientMatches.map((client) => {
+                const isSelected = selectedClient?.phone === client.phone;
+                const name = clientDisplayName(client);
+                return (
+                  <button
+                    key={client.phone}
+                    type="button"
+                    role="option"
+                    aria-selected={isSelected}
+                    onClick={() => setSelectedClient(client)}
+                    className={cn(
+                      "w-full text-left px-3 py-2.5 border-b border-border last:border-b-0 transition-colors",
+                      isSelected
+                        ? "bg-primary/15 text-foreground"
+                        : "hover:bg-primary/10",
+                    )}
+                  >
+                    <div className="font-mono text-sm font-medium text-primary">
+                      {client.tp_account?.trim() || "—"}
+                    </div>
+                    {name ? (
+                      <div className="text-xs text-muted-foreground mt-0.5 truncate">
+                        {name}
+                      </div>
+                    ) : null}
+                    <div className="text-[10px] text-muted-foreground/80 mt-0.5 font-mono truncate">
+                      {client.phone}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {typedTP.trim().length >= TP_SEARCH_MIN_LENGTH &&
+            !isFetching &&
+            clientMatches.length === 0 && (
+              <p className="text-xs text-muted-foreground">
+                No hay clientes con esa cuenta TP en tu cartera.
+              </p>
+            )}
+          {selectedClient ? (
+            <ClientAssignedPortfolioField
+              owner={normalizeOwnerProfile(selectedClient.owner)}
+            />
+          ) : null}
         </div>
 
         <DialogFooter>
@@ -301,7 +491,7 @@ export function GlobalAppointmentCreateModal({
           </Button>
           <Button
             type="button"
-            disabled={!phone.trim()}
+            disabled={!selectedClient}
             className="bg-gradient-primary text-primary-foreground"
             onClick={() => setStep("form")}
           >

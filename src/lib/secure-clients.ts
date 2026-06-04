@@ -282,7 +282,7 @@ export function phoneFromClientDetailId(id: string): string {
   return decodeURIComponent(id);
 }
 
-function normalizeOwnerProfile(
+export function normalizeOwnerProfile(
   owner: SecureClientOwnerProfile | SecureClientOwnerProfile[] | null | undefined,
 ): SecureClientOwnerProfile | null {
   if (!owner) return null;
@@ -346,12 +346,28 @@ export async function fetchSecureClientByPhone(
   }
 }
 
-export async function fetchSecureClients(
+export const CLIENT_PAGE_SIZE_OPTIONS = [12, 24, 48, 100] as const;
+export type ClientPageSize = (typeof CLIENT_PAGE_SIZE_OPTIONS)[number];
+
+export type SecureClientsPageResult = {
+  rows: SecureClientWithOwners[];
+  totalCount: number;
+};
+
+export async function fetchSecureClientsByOwnerId(
+  ownerId: string,
   filters: SecureClientFilters,
   sort: SecureClientSort | null,
-): Promise<SecureClientWithOwners[]> {
+  pagination: { page: number; pageSize: ClientPageSize },
+): Promise<SecureClientsPageResult> {
   try {
-    let query = supabase.from("secure_clients").select(SELECT_WITH_PROFILES);
+    const from = pagination.page * pagination.pageSize;
+    const to = from + pagination.pageSize - 1;
+
+    let query = supabase
+      .from("secure_clients")
+      .select(SELECT_WITH_PROFILES, { count: "exact" })
+      .eq("owner_id", ownerId);
 
     for (const key of TEXT_FILTER_KEYS) {
       const value = filters[key].trim();
@@ -399,11 +415,90 @@ export async function fetchSecureClients(
       });
     }
 
-    const { data, error } = await query;
+    const { data, error, count } = await query.range(from, to);
     if (error) throw error;
-    return ((data ?? []) as unknown as ClientRowWithProfileJoins[]).map(
-      mapClientRowWithProfiles,
-    );
+    return {
+      rows: ((data ?? []) as unknown as ClientRowWithProfileJoins[]).map(
+        mapClientRowWithProfiles,
+      ),
+      totalCount: count ?? 0,
+    };
+  } catch (err) {
+    const message =
+      err instanceof Error
+        ? err.message
+        : "No se pudieron cargar los clientes del asesor.";
+    throw new Error(message);
+  }
+}
+
+export async function fetchSecureClients(
+  filters: SecureClientFilters,
+  sort: SecureClientSort | null,
+  pagination: { page: number; pageSize: ClientPageSize },
+): Promise<SecureClientsPageResult> {
+  try {
+    const from = pagination.page * pagination.pageSize;
+    const to = from + pagination.pageSize - 1;
+
+    let query = supabase
+      .from("secure_clients")
+      .select(SELECT_WITH_PROFILES, { count: "exact" });
+
+    for (const key of TEXT_FILTER_KEYS) {
+      const value = filters[key].trim();
+      if (value) {
+        query = query.ilike(key, `%${value}%`);
+      }
+    }
+
+    for (const key of SELECT_FILTER_KEYS) {
+      const value = filters[key].trim();
+      if (value) {
+        query = query.eq(key, value);
+      }
+    }
+
+    const totalCallsRaw = filters.total_calls.trim();
+    if (totalCallsRaw !== "") {
+      const totalCalls = Number(totalCallsRaw);
+      if (!Number.isNaN(totalCalls)) {
+        query = query.eq("total_calls", totalCalls);
+      }
+    }
+
+    const dateFilters: Array<{ column: DateFilterKey; value: string }> = [
+      { column: "created_on", value: filters.created_on },
+      { column: "last_assignment", value: filters.last_assignment },
+      { column: "last_contacted", value: filters.last_contacted },
+      { column: "updated_at", value: filters.updated_at },
+    ];
+
+    for (const { column, value } of dateFilters) {
+      if (!value) continue;
+      query = query.gte(column, `${value}T00:00:00`).lte(column, `${value}T23:59:59`);
+    }
+
+    if (sort) {
+      query = query.order(sort.column, {
+        ascending: sort.direction === "asc",
+        nullsFirst: false,
+      });
+    } else {
+      query = query.order("created_on", {
+        ascending: false,
+        nullsFirst: false,
+      });
+    }
+
+    const { data, error, count } = await query.range(from, to);
+    if (error) throw error;
+    return {
+      rows: ((data ?? []) as unknown as ClientRowWithProfileJoins[]).map(
+        mapClientRowWithProfiles,
+      ),
+      totalCount: count ?? 0,
+    };
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "No se pudieron cargar los clientes.";

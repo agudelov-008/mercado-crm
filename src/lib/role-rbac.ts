@@ -53,8 +53,35 @@ export function shouldStripContactFromExcelExport(role: ProfileRole | null): boo
   return role === "Manager" || role === "Assistant";
 }
 
+/** Gestión de usuarios: Admin, CRM (Manager) y Asistente. */
 export function canAccessUserManagement(role: ProfileRole | null): boolean {
-  return role === "Admin";
+  return role === "Admin" || role === "Manager" || role === "Assistant";
+}
+
+/** Crear, editar y eliminar miembros del equipo (no aplica al Asistente). */
+export function canCrudTeamUsers(role: ProfileRole | null): boolean {
+  return role === "Admin" || role === "Manager";
+}
+
+/** El CRM solo puede aprovisionar Asistente y Agente. */
+export function getCreatableTeamRoles(
+  actorRole: ProfileRole | null,
+): Array<"Agent" | "Manager" | "Assistant"> {
+  if (actorRole === "Admin") return ["Agent", "Manager", "Assistant"];
+  if (actorRole === "Manager") return ["Assistant", "Agent"];
+  return [];
+}
+
+/** Admin y CRM pueden editar/eliminar este perfil; Asistente solo lectura. */
+export function canManageTeamMember(
+  actorRole: ProfileRole | null,
+  targetRole: ProfileRole,
+): boolean {
+  if (actorRole === "Admin") return true;
+  if (actorRole === "Manager") {
+    return targetRole === "Agent" || targetRole === "Assistant";
+  }
+  return false;
 }
 
 export function canAccessAffiliatesModule(role: ProfileRole | null): boolean {
@@ -70,9 +97,9 @@ export function canUpdateClientLeadStatus(role: ProfileRole | null): boolean {
   );
 }
 
-/** Edición de ficha de cliente (modal): solo Admin y Affiliate. */
+/** Edición de ficha de cliente (modal): solo Admin. La Afiliadora no puede editar. */
 export function canEditClientProfile(role: ProfileRole | null): boolean {
-  return role === "Admin" || role === "Affiliate";
+  return role === "Admin";
 }
 
 const RESTRICTED_COLUMNS_FOR_FIELD_ROLES: SecureClientColumn[] = [
@@ -95,9 +122,14 @@ export function canAccessDashboardNav(role: ProfileRole | null): boolean {
   return role !== null && role !== "Affiliate";
 }
 
-/** Mensajería (WhatsApp/Escribir): exclusiva de asesores en pista. */
+/** WhatsApp (wa.me): solo Admin y Asistente; Agentes sin acceso. */
 export function canMessageClients(role: ProfileRole | null): boolean {
-  return role === "Agent";
+  return role === "Admin" || role === "Assistant";
+}
+
+/** Llamada local (MicroSIP): no disponible para Afiliadora. */
+export function canInitiateClientCall(role: ProfileRole | null): boolean {
+  return role !== null && role !== "Affiliate";
 }
 
 /** Calendario global: visible para todos los roles (Affiliate en solo lectura). */

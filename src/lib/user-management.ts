@@ -7,6 +7,7 @@ export interface TeamProfile {
   first_name: string | null;
   last_name: string | null;
   role: ProfileRole;
+  pbx_extension: string | null;
   created_at: string | null;
 }
 
@@ -66,7 +67,7 @@ export async function fetchAgentProfiles(): Promise<TeamProfile[]> {
   try {
     const { data, error } = await supabase
       .from("profiles")
-      .select("id, email, first_name, last_name, role, created_at")
+      .select("id, email, first_name, last_name, role, pbx_extension, created_at")
       .in("role", [...PROVISIONABLE_TEAM_ROLES])
       .order("first_name", { ascending: true });
 
@@ -129,6 +130,7 @@ export async function createAgentWithUser(data: AgentFormInput): Promise<void> {
           firstName,
           lastName: lastName || null,
           role,
+          pbxExtension: null,
         },
       });
 
@@ -138,6 +140,7 @@ export async function createAgentWithUser(data: AgentFormInput): Promise<void> {
         user_password: password,
         user_first_name: firstName,
         user_last_name: lastName || null,
+        user_pbx_extension: null,
       });
 
       if (!rpcError) return;
@@ -219,7 +222,6 @@ export async function updateAgentProfile(
     const lastName = data.lastName.trim();
     const email = data.email.trim();
     const password = data.password.trim();
-
     if (!firstName) throw new Error("El nombre es obligatorio.");
     if (!email) throw new Error("El correo electrónico es obligatorio.");
 

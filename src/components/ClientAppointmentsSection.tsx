@@ -15,6 +15,7 @@ import {
   isAppointmentsReadOnly,
 } from "@/lib/appointment-rbac";
 import {
+  type AppointmentAccess,
   fetchAppointmentsByPhone,
   formatAppointmentDateTime,
   formatAppointmentTime,
@@ -29,12 +30,14 @@ import { cn } from "@/lib/utils";
 interface ClientAppointmentsSectionProps {
   clientPhone: string;
   clientLabel: string;
+  access?: AppointmentAccess;
   className?: string;
 }
 
 export function ClientAppointmentsSection({
   clientPhone,
   clientLabel,
+  access,
   className,
 }: ClientAppointmentsSectionProps) {
   const { profileRole } = useApp();
@@ -48,8 +51,9 @@ export function ClientAppointmentsSection({
   useAppointmentsRealtime();
 
   const { data: appointments = [], isLoading } = useQuery({
-    queryKey: ["appointments", "client", clientPhone],
-    queryFn: () => fetchAppointmentsByPhone(clientPhone),
+    queryKey: ["appointments", "client", clientPhone, access],
+    queryFn: () => fetchAppointmentsByPhone(clientPhone, access),
+    enabled: clientPhone.length > 0,
     ...appointmentsQueryOptions,
   });
 
