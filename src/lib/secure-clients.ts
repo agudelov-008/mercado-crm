@@ -1,3 +1,4 @@
+import { getCountryFilterKeys } from "@/lib/country-flags";
 import { supabase } from "@/lib/supabase";
 
 /**
@@ -135,9 +136,11 @@ export interface SecureClient {
   email: string | null;
   lead_status: LeadStatus | string | null;
   owner_id: string | null;
+  owner_name: string | null;
   total_calls: number;
   previous_lead_status: LeadStatus | string | null;
   previous_owner_id: string | null;
+  previous_owner_name: string | null;
   created_on: string | null;
   last_assignment: string | null;
   last_contacted: string | null;
@@ -170,8 +173,8 @@ export type TextFilterKey =
   | "tp_account"
   | "phone"
   | "email"
-  | "owner_id"
-  | "previous_owner_id";
+  | "owner_name"
+  | "previous_owner_name";
 
 export type SelectFilterKey = "lead_status" | "previous_lead_status";
 
@@ -192,10 +195,10 @@ export interface SecureClientFilters {
   phone: string;
   email: string;
   lead_status: string;
-  owner_id: string;
+  owner_name: string;
   total_calls: string;
   previous_lead_status: string;
-  previous_owner_id: string;
+  previous_owner_name: string;
   created_on: string;
   last_assignment: string;
   last_contacted: string;
@@ -211,17 +214,23 @@ export const EMPTY_FILTERS: SecureClientFilters = {
   phone: "",
   email: "",
   lead_status: "",
-  owner_id: "",
+  owner_name: "",
   total_calls: "",
   previous_lead_status: "",
-  previous_owner_id: "",
+  previous_owner_name: "",
   created_on: "",
   last_assignment: "",
   last_contacted: "",
   updated_at: "",
 };
 
-export type ColumnFilterType = "text" | "select" | "date" | "number";
+export type ColumnFilterType =
+  | "text"
+  | "select"
+  | "searchable-select"
+  | "country"
+  | "date"
+  | "number";
 
 export interface ClientTableColumnDef {
   key: SecureClientColumn;
@@ -233,46 +242,94 @@ export interface ClientTableColumnDef {
 export const CLIENT_TABLE_COLUMNS: ClientTableColumnDef[] = [
   { key: "first_name", label: "First Name", filterType: "text" },
   { key: "last_name", label: "Last Name", filterType: "text" },
-  { key: "country", label: "Country", filterType: "text" },
-  { key: "affiliate", label: "Affiliate", filterType: "text" },
+  { key: "country", label: "Country", filterType: "country" },
+  { key: "affiliate", label: "Affiliate", filterType: "searchable-select" },
   { key: "tp_account", label: "Tp Account", filterType: "text" },
   { key: "phone", label: "Phone", filterType: "text" },
   { key: "email", label: "Email", filterType: "text" },
   { key: "lead_status", label: "Lead Status", filterType: "select" },
-  { key: "owner_id", label: "Owner", filterType: "text" },
+  { key: "owner_name", label: "Owner", filterType: "searchable-select" },
   { key: "total_calls", label: "Total Calls", filterType: "number" },
   {
     key: "previous_lead_status",
     label: "Previous Lead Status",
     filterType: "select",
   },
-  { key: "previous_owner_id", label: "Previous Owner", filterType: "text" },
+  {
+    key: "previous_owner_name",
+    label: "Previous Owner",
+    filterType: "searchable-select",
+  },
   { key: "created_on", label: "Created On", filterType: "date" },
   { key: "last_assignment", label: "Last Assignment", filterType: "date" },
   { key: "last_contacted", label: "Last Contacted", filterType: "date" },
   { key: "updated_at", label: "Updated At", filterType: "date" },
 ];
 
-const SELECT_COLUMNS = CLIENT_TABLE_COLUMNS.map((c) => c.key).join(",");
+const SELECT_COLUMNS = [
+  ...new Set([
+    ...CLIENT_TABLE_COLUMNS.map((c) => c.key),
+    "owner_id",
+    "previous_owner_id",
+  ]),
+].join(",");
 
 const SELECT_WITH_PROFILES = `${SELECT_COLUMNS}, owner:profiles!owner_id(first_name, last_name, email), previous_owner:profiles!previous_owner_id(first_name, last_name, email)`;
 
 const TEXT_FILTER_KEYS: TextFilterKey[] = [
   "first_name",
   "last_name",
-  "country",
   "affiliate",
   "tp_account",
   "phone",
   "email",
-  "owner_id",
-  "previous_owner_id",
+  "owner_name",
+  "previous_owner_name",
 ];
 
 const SELECT_FILTER_KEYS: SelectFilterKey[] = [
   "lead_status",
   "previous_lead_status",
 ];
+
+const GLOBAL_SEARCH_COLUMNS = [
+  "first_name",
+  "last_name",
+  "phone",
+  "email",
+  "tp_account",
+] as const;
+
+function applyCountryFilter<
+  T extends {
+    or: (filters: string) => T;
+    ilike: (column: string, pattern: string) => T;
+  },
+>(query: T, value: string): T {
+  const trimmed = value.trim();
+  if (!trimmed) return query;
+
+  const keys = getCountryFilterKeys(trimmed);
+  if (keys?.length) {
+    const orFilter = keys.map((key) => `country.ilike.%${key}%`).join(",");
+    return query.or(orFilter);
+  }
+
+  return query.ilike("country", `%${trimmed}%`);
+}
+
+function applyGlobalSearch<T extends { or: (filters: string) => T }>(
+  query: T,
+  globalSearch?: string,
+): T {
+  const term = globalSearch?.trim();
+  if (!term) return query;
+  const pattern = `%${term}%`;
+  const orFilter = GLOBAL_SEARCH_COLUMNS.map(
+    (col) => `${col}.ilike.${pattern}`,
+  ).join(",");
+  return query.or(orFilter);
+}
 
 export function clientDetailIdFromPhone(phone: string): string {
   return encodeURIComponent(phone);
@@ -319,16 +376,6 @@ export async function fetchSecureClientByPhone(
   phone: string,
 ): Promise<SecureClientDetail | null> {
   try {
-    const { data: fromClients, error: clientsError } = await supabase
-      .from("clients")
-      .select(SELECT_WITH_PROFILES)
-      .eq("phone", phone)
-      .maybeSingle();
-
-    if (!clientsError && fromClients) {
-      return mapClientRowWithProfiles(fromClients as unknown as ClientRowWithProfileJoins);
-    }
-
     const { data, error } = await supabase
       .from("secure_clients")
       .select(SELECT_WITH_PROFILES)
@@ -359,6 +406,7 @@ export async function fetchSecureClientsByOwnerId(
   filters: SecureClientFilters,
   sort: SecureClientSort | null,
   pagination: { page: number; pageSize: ClientPageSize },
+  globalSearch?: string,
 ): Promise<SecureClientsPageResult> {
   try {
     const from = pagination.page * pagination.pageSize;
@@ -375,6 +423,8 @@ export async function fetchSecureClientsByOwnerId(
         query = query.ilike(key, `%${value}%`);
       }
     }
+
+    query = applyCountryFilter(query, filters.country);
 
     for (const key of SELECT_FILTER_KEYS) {
       const value = filters[key].trim();
@@ -402,6 +452,8 @@ export async function fetchSecureClientsByOwnerId(
       if (!value) continue;
       query = query.gte(column, `${value}T00:00:00`).lte(column, `${value}T23:59:59`);
     }
+
+    query = applyGlobalSearch(query, globalSearch);
 
     if (sort) {
       query = query.order(sort.column, {
@@ -436,6 +488,7 @@ export async function fetchSecureClients(
   filters: SecureClientFilters,
   sort: SecureClientSort | null,
   pagination: { page: number; pageSize: ClientPageSize },
+  globalSearch?: string,
 ): Promise<SecureClientsPageResult> {
   try {
     const from = pagination.page * pagination.pageSize;
@@ -451,6 +504,8 @@ export async function fetchSecureClients(
         query = query.ilike(key, `%${value}%`);
       }
     }
+
+    query = applyCountryFilter(query, filters.country);
 
     for (const key of SELECT_FILTER_KEYS) {
       const value = filters[key].trim();
@@ -478,6 +533,8 @@ export async function fetchSecureClients(
       if (!value) continue;
       query = query.gte(column, `${value}T00:00:00`).lte(column, `${value}T23:59:59`);
     }
+
+    query = applyGlobalSearch(query, globalSearch);
 
     if (sort) {
       query = query.order(sort.column, {
@@ -548,6 +605,19 @@ export async function bulkUpdateClientOwner(
   }
 }
 
+export async function bulkDeleteClients(phones: string[]): Promise<void> {
+  if (phones.length === 0) return;
+
+  try {
+    const { error } = await supabase.from("clients").delete().in("phone", phones);
+    if (error) throw error;
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "No se pudieron eliminar los clientes.";
+    throw new Error(message);
+  }
+}
+
 export async function bulkUpdateLeadStatus(
   phones: string[],
   leadStatus: LeadStatus | string,
@@ -597,4 +667,9 @@ export function formatClientDateTime(value: string | null): string {
   const hh = String(date.getHours()).padStart(2, "0");
   const min = String(date.getMinutes()).padStart(2, "0");
   return `${dd}/${mm}/${yyyy} ${hh}:${min}`;
+}
+
+/** Fecha y hora del último contacto (p. ej. tras pulsar Llamar). */
+export function formatLastContacted(value: string | null): string {
+  return formatClientDateTime(value);
 }

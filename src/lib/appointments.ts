@@ -318,6 +318,14 @@ export async function createAppointment(
   input: CreateAppointmentInput,
 ): Promise<Appointment> {
   try {
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError) throw authError;
+    if (!user?.id) throw new Error("No autorizado.");
+
     const { data, error } = await supabase
       .from("appointments")
       .insert({
@@ -325,7 +333,7 @@ export async function createAppointment(
         title: input.title.trim(),
         description: input.description?.trim() || null,
         starts_at: input.starts_at,
-        created_by: input.created_by ?? null,
+        created_by: user.id,
       })
       .select(appointmentSelectForAccess())
       .single();

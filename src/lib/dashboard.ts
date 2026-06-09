@@ -118,11 +118,19 @@ function buildLeadDistribution(
   });
 }
 
-export async function fetchDashboardMetrics(): Promise<DashboardMetrics> {
+export async function fetchDashboardMetrics(
+  ownerId?: string,
+): Promise<DashboardMetrics> {
   try {
-    const { data, error } = await supabase
+    let query = supabase
       .from("secure_clients")
       .select("lead_status, total_calls");
+
+    if (ownerId) {
+      query = query.eq("owner_id", ownerId);
+    }
+
+    const { data, error } = await query;
 
     if (error) throw error;
 
@@ -178,14 +186,21 @@ export async function fetchDashboardMetrics(): Promise<DashboardMetrics> {
 
 export async function fetchPriorityClients(
   limit = 6,
+  ownerId?: string,
 ): Promise<SecureClientWithOwners[]> {
   try {
-    const { data: followUps, error: followUpError } = await supabase
+    let followUpQuery = supabase
       .from("secure_clients")
       .select(PRIORITY_CLIENT_SELECT)
       .in("lead_status", [...FOLLOW_UP_STATUSES])
       .order("updated_at", { ascending: false })
       .limit(limit);
+
+    if (ownerId) {
+      followUpQuery = followUpQuery.eq("owner_id", ownerId);
+    }
+
+    const { data: followUps, error: followUpError } = await followUpQuery;
 
     if (followUpError) throw followUpError;
 
@@ -197,11 +212,17 @@ export async function fetchPriorityClients(
       return priority.slice(0, limit);
     }
 
-    const { data: backfill, error: backfillError } = await supabase
+    let backfillQuery = supabase
       .from("secure_clients")
       .select(PRIORITY_CLIENT_SELECT)
       .order("updated_at", { ascending: false })
       .limit(limit * 4);
+
+    if (ownerId) {
+      backfillQuery = backfillQuery.eq("owner_id", ownerId);
+    }
+
+    const { data: backfill, error: backfillError } = await backfillQuery;
 
     if (backfillError) throw backfillError;
 

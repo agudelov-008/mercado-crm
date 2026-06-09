@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { z } from "zod";
 import { useApp } from "@/lib/app-context";
 import {
+  detectCountryFromPhone,
   fetchAffiliateOptions,
   fetchAgentProfileOptions,
   insertManualClient,
@@ -151,6 +152,19 @@ export function ManualClientModal({ open, onOpenChange }: ManualClientModalProps
   const onSubmit = async (values: ManualClientFormValues) => {
     const phone = normalizeClientPhone(values.phone);
 
+    const country = detectCountryFromPhone(phone);
+    if (!country) {
+      form.setError("phone", {
+        type: "manual",
+        message:
+          "El indicativo telefónico no corresponde a ningún país permitido",
+      });
+      toast.error(
+        "El indicativo telefónico no corresponde a ningún país permitido",
+      );
+      return;
+    }
+
     try {
       const exists = await isClientPhoneRegistered(phone);
       if (exists) {
@@ -183,7 +197,7 @@ export function ManualClientModal({ open, onOpenChange }: ManualClientModalProps
       last_name: values.last_name?.trim() || null,
       phone,
       email: values.email?.trim() || null,
-      country: values.country?.trim() || null,
+      country,
       tp_account: values.tp_account?.trim() || null,
       lead_status: values.lead_status,
       affiliate,
@@ -281,6 +295,15 @@ export function ManualClientModal({ open, onOpenChange }: ManualClientModalProps
                         form.formState.errors.phone && "border-destructive",
                       )}
                       disabled={isBusy}
+                      onChange={(event) => {
+                        field.onChange(event);
+                        const detected = detectCountryFromPhone(
+                          event.target.value,
+                        );
+                        form.setValue("country", detected ?? "", {
+                          shouldValidate: false,
+                        });
+                      }}
                     />
                   </FormControl>
                   <FormMessage />
@@ -308,44 +331,24 @@ export function ManualClientModal({ open, onOpenChange }: ManualClientModalProps
               )}
             />
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <FormField
-                control={form.control}
-                name="country"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>País</FormLabel>
-                    <FormControl>
-                      <Input
-                        {...field}
-                        placeholder="Colombia"
-                        className="bg-surface-elevated border-border"
-                        disabled={isBusy}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="tp_account"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Cuenta TP</FormLabel>
-                    <FormControl>
-                      <Input
-                        {...field}
-                        placeholder="TP-0000"
-                        className="bg-surface-elevated border-border"
-                        disabled={isBusy}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
+            <FormField
+              control={form.control}
+              name="tp_account"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Cuenta TP</FormLabel>
+                  <FormControl>
+                    <Input
+                      {...field}
+                      placeholder="TP-0000"
+                      className="bg-surface-elevated border-border"
+                      disabled={isBusy}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
 
             <FormField
               control={form.control}

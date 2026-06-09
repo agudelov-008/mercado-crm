@@ -141,11 +141,19 @@ export async function insertActivityLog(
   input: InsertActivityLogInput,
 ): Promise<ActivityLog> {
   try {
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError) throw authError;
+    if (!user?.id) throw new Error("No autorizado.");
+
     const { data, error } = await supabase
       .from("activity_logs")
       .insert({
         client_phone: input.client_phone,
-        agent_id: input.agent_id,
+        agent_id: user.id,
         text: input.text.trim(),
         type: input.type ?? "comment",
       })

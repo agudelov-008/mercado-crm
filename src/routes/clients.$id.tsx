@@ -21,6 +21,7 @@ import {
   fetchSecureClientByPhone,
   formatClientDate,
   formatClientDateTime,
+  formatLastContacted,
   formatOwnerDisplayName,
   LEAD_STATUS_BADGE_STYLES,
   LEAD_STATUS_OPTIONS,
@@ -39,8 +40,9 @@ import {
   canInitiateClientCall,
   canMessageClients,
   canUpdateClientLeadStatus,
+  canViewClientContactInUi,
 } from "@/lib/role-rbac";
-import { initiateLocalPhoneCall } from "@/lib/local-call";
+import { useClientCall } from "@/hooks/use-client-call";
 import { fetchActivityLogsByPhone } from "@/lib/activity-logs";
 import { buildAppointmentAccess } from "@/lib/appointments";
 import { ClientEditModal } from "@/components/ClientEditModal";
@@ -48,7 +50,6 @@ import { ClientActivityPanel } from "@/components/ClientActivityPanel";
 import { ClientAppointmentsSection } from "@/components/ClientAppointmentsSection";
 import { MaskedContactText } from "@/components/MaskedContactText";
 import { WhatsAppActionButton } from "@/components/WhatsAppActionButton";
-import { useContactUiMasking } from "@/lib/contact-masking";
 import {
   Select,
   SelectContent,
@@ -62,9 +63,13 @@ import type { ProfileAgentOption } from "@/lib/user-management";
 
 export const Route = createFileRoute("/clients/$id")({
   component: ClientDetail,
-  validateSearch: z.object({
-    edit: z.enum(["1", "true"]).optional(),
-  }),
+  validateSearch: z
+    .object({
+      edit: z.enum(["1", "true"]).optional(),
+      search: z.string().optional(),
+      q: z.string().optional(),
+    })
+    .strip(),
 });
 
 const NONE_OWNER = "__none__";
@@ -109,15 +114,8 @@ function ContactDetailField({
   value: string | null | undefined;
   unmasked?: boolean;
 }) {
-  const maskContact = useContactUiMasking() && !unmasked;
-
   return (
-    <div
-      className={cn(
-        "p-3 rounded-lg bg-surface border border-border",
-        maskContact && "select-none",
-      )}
-    >
+    <div className="p-3 rounded-lg bg-surface border border-border">
       <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
         {label}
       </div>
@@ -323,13 +321,14 @@ export function ClientDetail() {
   const isProfileReady = !!user?.id && profileRole !== null && !isAuthLoading;
 
   const isAffiliate = profileRole === "Affiliate";
-  const maskContact = useContactUiMasking() && !isAffiliate;
+  const canViewContact = canViewClientContactInUi(profileRole);
   const canAssign = canAssignClients(profileRole);
   const canEditProfile = canEditClientProfile(profileRole);
   const canEditStatus = canUpdateClientLeadStatus(profileRole);
   const canOpenWhatsApp = canMessageClients(profileRole);
   const canCall = canInitiateClientCall(profileRole);
   const isAgent = profileRole === "Agent";
+  const { callClient } = useClientCall();
   const isAssistant = profileRole === "Assistant";
 
   const scopedAccess =
@@ -373,7 +372,7 @@ export function ClientDetail() {
     navigate({
       to: "/clients/$id",
       params: { id },
-      search: {},
+      search: () => ({}),
       replace: true,
     });
   }, [canEditProfile, search.edit, client, id, navigate]);
@@ -422,7 +421,7 @@ export function ClientDetail() {
 
   const displayName =
     [client.first_name, client.last_name].filter(Boolean).join(" ").trim() ||
-    (maskContact ? "Cliente" : client.phone);
+    (canViewContact ? client.phone : "Cliente");
   const initials =
     displayName
       .split(" ")
@@ -466,14 +465,18 @@ export function ClientDetail() {
                   )}
                 </div>
                 <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-foreground mt-2">
-                  <span className={cn("flex items-center gap-1.5", maskContact && "select-none")}>
-                    <Mail className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                    {isAffiliate ? <span>{client.email}</span> : <MaskedContactText kind="email" value={client.email} />}
-                  </span>
-                  <span className={cn("flex items-center gap-1.5", maskContact && "select-none")}>
-                    <Phone className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                    {isAffiliate ? <span className="font-mono tabular-nums">{client.phone}</span> : <MaskedContactText kind="phone" value={client.phone} mono />}
-                  </span>
+                  {canViewContact && (
+                    <span className="flex items-center gap-1.5">
+                      <Mail className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      {isAffiliate ? <span>{client.email}</span> : <MaskedContactText kind="email" value={client.email} />}
+                    </span>
+                  )}
+                  {canViewContact && (
+                    <span className="flex items-center gap-1.5">
+                      <Phone className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      {isAffiliate ? <span className="font-mono tabular-nums">{client.phone}</span> : <MaskedContactText kind="phone" value={client.phone} mono />}
+                    </span>
+                  )}
                   {client.country && (
                     <span className="flex items-center gap-1.5">
                       <Globe className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
@@ -488,7 +491,7 @@ export function ClientDetail() {
                 )}
                 {isAgent && (
                   <p className="text-xs text-muted-foreground mt-2">
-                    Contacto enmascarado en pantalla. Puedes llamar, cambiar estado y
+                    Sin acceso a teléfono ni correo. Puedes llamar, cambiar estado y
                     registrar notas.
                   </p>
                 )}
@@ -512,7 +515,7 @@ export function ClientDetail() {
                 {canCall && (
                   <button
                     type="button"
-                    onClick={() => initiateLocalPhoneCall(phone)}
+                    onClick={() => void callClient(phone)}
                     className="h-10 px-4 rounded-md bg-success/15 hover:bg-success/25 text-success border border-success/30 flex items-center gap-2 text-sm font-medium"
                   >
                     <Phone className="h-4 w-4" /> Llamar
@@ -538,8 +541,12 @@ export function ClientDetail() {
             </div>
             <DetailField label="Affiliate" value={client.affiliate ?? "—"} />
             <DetailField label="TP Account" value={client.tp_account ?? "—"} mono />
-            <ContactDetailField label="Phone" kind="phone" value={client.phone} unmasked={isAffiliate} />
-            <ContactDetailField label="Email" kind="email" value={client.email} unmasked={isAffiliate} />
+            {canViewContact && (
+              <ContactDetailField label="Phone" kind="phone" value={client.phone} unmasked={isAffiliate} />
+            )}
+            {canViewContact && (
+              <ContactDetailField label="Email" kind="email" value={client.email} unmasked={isAffiliate} />
+            )}
             <LeadStatusField client={client} canEdit={canEditStatus} />
             <OwnerAssignmentField
               client={client}
@@ -569,7 +576,7 @@ export function ClientDetail() {
             />
             <DetailField
               label="Last Contacted"
-              value={formatClientDate(client.last_contacted)}
+              value={formatLastContacted(client.last_contacted)}
             />
             <DetailField
               label="Updated At"
@@ -577,65 +584,71 @@ export function ClientDetail() {
             />
           </div>
 
-          <div className="rounded-xl border border-border bg-card/40 p-5">
-            <h2 className="text-sm font-semibold flex items-center gap-2">
-              <User className="h-4 w-4" /> Información de contacto
-            </h2>
-            <p className="text-xs text-muted-foreground mt-1">
-              {isAffiliate
-                ? "Datos visibles para tu rol de afiliadora."
-                : maskContact
-                  ? "Datos de contacto enmascarados según tu rol de agente."
+          {(canViewContact || client.affiliate) && (
+            <div className="rounded-xl border border-border bg-card/40 p-5">
+              <h2 className="text-sm font-semibold flex items-center gap-2">
+                <User className="h-4 w-4" /> Información de contacto
+              </h2>
+              <p className="text-xs text-muted-foreground mt-1">
+                {isAffiliate
+                  ? "Datos visibles para tu rol de afiliadora."
                   : "Datos visibles según tu rol y políticas de acceso en Supabase."}
-            </p>
-            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className={cn("flex items-start gap-3 p-3 rounded-lg bg-surface border border-border", maskContact && "select-none")}>
-                <Phone className="h-4 w-4 text-success mt-0.5" />
-                <div>
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                    Teléfono
-                  </div>
-                  <div className="text-sm font-mono mt-0.5">
-                    {isAffiliate ? <span>{client.phone}</span> : <MaskedContactText kind="phone" value={client.phone} mono />}
-                  </div>
-                </div>
-              </div>
-              <div className={cn("flex items-start gap-3 p-3 rounded-lg bg-surface border border-border", maskContact && "select-none")}>
-                <Mail className="h-4 w-4 text-info mt-0.5" />
-                <div>
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                    Correo
-                  </div>
-                  <div className="text-sm mt-0.5 break-all">
-                    {isAffiliate ? <span>{client.email}</span> : <MaskedContactText kind="email" value={client.email} />}
-                  </div>
-                </div>
-              </div>
-              {client.affiliate && (
-                <div className="flex items-start gap-3 p-3 rounded-lg bg-surface border border-border sm:col-span-2">
-                  <Building2 className="h-4 w-4 text-primary mt-0.5" />
-                  <div>
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                      Afiliadora
+              </p>
+              <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {canViewContact && (
+                  <div className="flex items-start gap-3 p-3 rounded-lg bg-surface border border-border">
+                    <Phone className="h-4 w-4 text-success mt-0.5" />
+                    <div>
+                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                        Teléfono
+                      </div>
+                      <div className="text-sm font-mono mt-0.5">
+                        {isAffiliate ? <span>{client.phone}</span> : <MaskedContactText kind="phone" value={client.phone} mono />}
+                      </div>
                     </div>
-                    <div className="text-sm mt-0.5">{client.affiliate}</div>
                   </div>
-                </div>
-              )}
+                )}
+                {canViewContact && (
+                  <div className="flex items-start gap-3 p-3 rounded-lg bg-surface border border-border">
+                    <Mail className="h-4 w-4 text-info mt-0.5" />
+                    <div>
+                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                        Correo
+                      </div>
+                      <div className="text-sm mt-0.5 break-all">
+                        {isAffiliate ? <span>{client.email}</span> : <MaskedContactText kind="email" value={client.email} />}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {client.affiliate && (
+                  <div className="flex items-start gap-3 p-3 rounded-lg bg-surface border border-border sm:col-span-2">
+                    <Building2 className="h-4 w-4 text-primary mt-0.5" />
+                    <div>
+                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                        Afiliadora
+                      </div>
+                      <div className="text-sm mt-0.5">{client.affiliate}</div>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
-          <ClientAppointmentsSection
-            clientPhone={phone}
-            clientLabel={displayName}
-            access={scopedAccess?.appointments}
-          />
+          {!isAffiliate && (
+            <ClientAppointmentsSection
+              clientPhone={phone}
+              clientLabel={displayName}
+              access={scopedAccess?.appointments}
+            />
+          )}
 
           <div className="rounded-xl border border-border bg-card/40 p-5 flex items-center gap-3 text-xs text-muted-foreground">
             <Calendar className="h-4 w-4 shrink-0" />
             <span>
               Última actualización: {formatClientDate(client.updated_at)} · Último
-              contacto: {formatClientDate(client.last_contacted)}
+              contacto: {formatLastContacted(client.last_contacted)}
             </span>
           </div>
         </div>
@@ -662,6 +675,7 @@ export function ClientDetail() {
             navigate({
               to: "/clients/$id",
               params: { id: clientDetailIdFromPhone(newPhone) },
+              search: () => ({}),
               replace: true,
             });
           }}

@@ -22,6 +22,7 @@ import {
   EMPTY_FILTERS,
   fetchSecureClientsByOwnerId,
   formatClientDate,
+  formatLastContacted,
   LEAD_STATUS_BADGE_STYLES,
   LEAD_STATUS_OPTIONS,
   type ClientPageSize,
@@ -59,7 +60,7 @@ interface AgentPortfolioModalProps {
 }
 
 const PORTFOLIO_COLUMNS: ClientTableColumnDef[] = CLIENT_TABLE_COLUMNS.filter(
-  (col) => col.key !== "owner_id" && col.key !== "previous_owner_id",
+  (col) => col.key !== "owner_name" && col.key !== "previous_owner_name",
 );
 
 const STATUS_COLUMNS: SecureClientColumn[] = [
@@ -78,10 +79,12 @@ function getCellValue(row: SecureClientWithOwners, column: SecureClientColumn): 
     return value === null || value === undefined ? "—" : String(value);
   }
   if (value === null || value === undefined) return "—";
+  if (column === "last_contacted") {
+    return formatLastContacted(String(value));
+  }
   if (
     column === "created_on" ||
     column === "last_assignment" ||
-    column === "last_contacted" ||
     column === "updated_at"
   ) {
     return formatClientDate(String(value));
@@ -689,6 +692,7 @@ export function AgentPortfolioModal({
                                   params={{
                                     id: clientDetailIdFromPhone(row.phone),
                                   }}
+                                  search={{}}
                                   onClick={() => onOpenChange(false)}
                                 >
                                   <ExternalLink className="h-3.5 w-3.5" />

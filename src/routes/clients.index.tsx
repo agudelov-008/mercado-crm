@@ -1,6 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import {
+  clientsIndexSearchSchema,
+  clientsPageIndexFromSearch,
+  clientsPageSizeFromSearch,
+  mergeClientsIndexSearch,
+} from "@/lib/clients-route-search";
 import {
   ArrowDown,
   ArrowLeft,
@@ -13,20 +19,26 @@ import {
   Pencil,
   Phone,
   Plus,
+  Trash2,
   UserCog,
 } from "lucide-react";
 import { toast } from "sonner";
+import { fetchAffiliateOptions } from "@/lib/client-import";
 import { fetchAgentsForOwnerSelect } from "@/lib/user-management";
+import { SearchableFilterSelect } from "@/components/SearchableFilterSelect";
 import {
   bulkUpdateClientOwner,
   bulkUpdateLeadStatus,
+  bulkDeleteClients,
   CLIENT_PAGE_SIZE_OPTIONS,
   clientDetailIdFromPhone,
   type ClientPageSize,
   type ClientTableColumnDef,
   EMPTY_FILTERS,
   fetchSecureClients,
+  fetchSecureClientsByOwnerId,
   formatClientDate,
+  formatLastContacted,
   formatOwnerDisplayName,
   LEAD_STATUS_BADGE_STYLES,
   LEAD_STATUS_OPTIONS,
@@ -56,7 +68,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { initiateLocalPhoneCall } from "@/lib/local-call";
+import { useClientCall } from "@/hooks/use-client-call";
 import { ClientImportModal } from "@/components/ClientImportModal";
 import { ManualClientModal } from "@/components/ManualClientModal";
 import { MaskedContactText } from "@/components/MaskedContactText";
@@ -66,10 +78,14 @@ import { downloadClientsExcel } from "@/lib/client-export";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/lib/app-context";
 import { useAuth } from "@/lib/auth-context";
-import { CountryDisplay } from "@/lib/country-flags";
+import {
+  CountryDisplay,
+  getSupportedCountryFilterOptions,
+} from "@/lib/country-flags";
 import {
   canAddManualClient,
   canAssignClients,
+  canBulkDeleteClients,
   canEditClientProfile,
   canExportClientsToExcel,
   canImportClientBases,
@@ -78,7 +94,10 @@ import {
   getVisibleClientTableColumns,
 } from "@/lib/role-rbac";
 
-export const Route = createFileRoute("/clients/")({ component: ClientsPage });
+export const Route = createFileRoute("/clients/")({
+  component: ClientsPage,
+  validateSearch: clientsIndexSearchSchema,
+});
 
 const STATUS_COLUMNS: SecureClientColumn[] = [
   "lead_status",
@@ -86,21 +105,23 @@ const STATUS_COLUMNS: SecureClientColumn[] = [
 ];
 
 function getCellValue(row: SecureClientWithOwners, column: SecureClientColumn): string {
-  if (column === "owner_id") {
-    return formatOwnerDisplayName(row.owner);
+  if (column === "owner_name") {
+    return row.owner_name ?? formatOwnerDisplayName(row.owner);
   }
-  if (column === "previous_owner_id") {
-    return formatOwnerDisplayName(row.previous_owner);
+  if (column === "previous_owner_name") {
+    return row.previous_owner_name ?? formatOwnerDisplayName(row.previous_owner);
   }
   const value = row[column];
   if (column === "total_calls") {
     return value === null || value === undefined ? "—" : String(value);
   }
   if (value === null || value === undefined) return "—";
+  if (column === "last_contacted") {
+    return formatLastContacted(String(value));
+  }
   if (
     column === "created_on" ||
     column === "last_assignment" ||
-    column === "last_contacted" ||
     column === "updated_at"
   ) {
     return formatClientDate(String(value));
@@ -168,23 +189,65 @@ function ColumnFilter({
   col,
   filters,
   onChange,
+  countryOptions,
+  affiliateOptions,
+  ownerOptions,
 }: {
   col: ClientTableColumnDef;
   filters: SecureClientFilters;
   onChange: (next: SecureClientFilters) => void;
+  countryOptions: string[];
+  affiliateOptions: string[];
+  ownerOptions: string[];
 }) {
+  if (col.filterType === "searchable-select") {
+    const key = col.key as "affiliate" | "owner_name" | "previous_owner_name";
+    const options = key === "affiliate" ? affiliateOptions : ownerOptions;
+
+    return (
+      <SearchableFilterSelect
+        value={filters[key]}
+        onChange={(v) => onChange({ ...filters, [key]: v })}
+        options={options}
+        placeholder="Todos"
+      />
+    );
+  }
+
+  if (col.filterType === "country") {
+    return (
+      <Select
+        value={filters.country || "all"}
+        onValueChange={(v) =>
+          onChange({ ...filters, country: v === "all" ? "" : v })
+        }
+      >
+        <SelectTrigger
+          className="h-7 min-w-0 text-xs p-1 bg-slate-900 border-slate-800 text-slate-300 w-full rounded"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <SelectValue placeholder="Todos" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">Todos</SelectItem>
+          {countryOptions.map((country) => (
+            <SelectItem key={country} value={country}>
+              <CountryDisplay country={country} />
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    );
+  }
+
   if (col.filterType === "text") {
     const key = col.key as Extract<
       SecureClientColumn,
       | "first_name"
       | "last_name"
-      | "country"
-      | "affiliate"
       | "tp_account"
       | "phone"
       | "email"
-      | "owner_id"
-      | "previous_owner_id"
     >;
     return (
       <Input
@@ -256,12 +319,17 @@ function ColumnFilter({
 
 function ClientsPage() {
   const navigate = useNavigate();
+  const searchParams = Route.useSearch();
+  const { search: globalSearch = "" } = searchParams;
+  const page = clientsPageIndexFromSearch(searchParams);
+  const pageSize = clientsPageSizeFromSearch(searchParams);
   const queryClient = useQueryClient();
   const { user, isLoading: isAuthLoading } = useAuth();
   const { profileRole } = useApp();
   const profileId = user?.id;
   const isProfileReady = !!profileId && profileRole !== null && !isAuthLoading;
   const isAgent = profileRole === "Agent";
+  const { callClient } = useClientCall();
   const canOpenWhatsApp = canMessageClients(profileRole);
   const canCall = canInitiateClientCall(profileRole);
   const maskContact = useContactUiMasking();
@@ -270,11 +338,12 @@ function ClientsPage() {
   const canImport = canImportClientBases(profileRole);
   const canAddManual = canAddManualClient(profileRole);
   const canExport = canExportClientsToExcel(profileRole);
+  const canBulkDelete = canBulkDeleteClients(profileRole);
   const visibleColumns = useMemo(
     () => getVisibleClientTableColumns(profileRole),
     [profileRole],
   );
-  const tableColSpan = visibleColumns.length + (canAssign ? 2 : 1);
+  const tableColSpan = visibleColumns.length + (canBulkDelete ? 2 : 1);
   const [isExporting, setIsExporting] = useState(false);
   const [filters, setFilters] = useState<SecureClientFilters>(EMPTY_FILTERS);
   const [sort, setSort] = useState<SecureClientSort | null>(null);
@@ -282,18 +351,56 @@ function ClientsPage() {
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkStatus, setBulkStatus] = useState<LeadStatus>("New");
   const [bulkAssignAgentId, setBulkAssignAgentId] = useState<string>("");
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [importOpen, setImportOpen] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
-  const [page, setPage] = useState(0);
-  const [pageSize, setPageSize] = useState<ClientPageSize>(24);
 
-  useEffect(() => {
-    setPage(0);
-  }, [filters, sort, pageSize]);
+  const updateClientsSearch = (
+    patch: Partial<typeof searchParams>,
+    replace = true,
+  ) => {
+    void navigate({
+      to: "/clients",
+      search: (prev) => mergeClientsIndexSearch(prev, patch),
+      replace,
+    });
+  };
+
+  const goToPage = (pageIndex: number) => {
+    const clamped = Math.max(0, pageIndex);
+    updateClientsSearch({
+      page: clamped > 0 ? clamped + 1 : undefined,
+    });
+  };
+
+  const handlePageSizeChange = (size: ClientPageSize) => {
+    updateClientsSearch({
+      pageSize: size,
+      page: undefined,
+    });
+  };
+
+  const resetPageInUrl = () => {
+    if (searchParams.page > 1) {
+      updateClientsSearch({ page: undefined });
+    }
+  };
+
+  const normalizedGlobalSearch = globalSearch.trim() || undefined;
 
   const queryKey = useMemo(
-    () => ["secure-clients", profileId, filters, sort, page, pageSize] as const,
-    [profileId, filters, sort, page, pageSize],
+    () =>
+      [
+        "secure-clients",
+        profileId,
+        filters,
+        sort,
+        page,
+        pageSize,
+        normalizedGlobalSearch,
+      ] as const,
+    [profileId, filters, sort, page, pageSize, normalizedGlobalSearch],
   );
 
   const {
@@ -304,9 +411,26 @@ function ClientsPage() {
     error,
   } = useQuery({
     queryKey,
-    queryFn: () => fetchSecureClients(filters, sort, { page, pageSize }),
+    queryFn: () => {
+      const pagination = { page, pageSize };
+      if (isAgent && profileId) {
+        return fetchSecureClientsByOwnerId(
+          profileId,
+          filters,
+          sort,
+          pagination,
+          normalizedGlobalSearch,
+        );
+      }
+      return fetchSecureClients(
+        filters,
+        sort,
+        pagination,
+        normalizedGlobalSearch,
+      );
+    },
     enabled: isProfileReady,
-    staleTime: 30_000,
+    staleTime: 60_000,
   });
 
   const clients = clientsPage?.rows ?? [];
@@ -316,17 +440,37 @@ function ClientsPage() {
   const pageTo = Math.min((page + 1) * pageSize, totalCount);
 
   useEffect(() => {
-    setPage((p) => Math.min(p, Math.max(0, totalPages - 1)));
-  }, [totalPages]);
+    if (isPending || totalCount === 0) return;
+    const maxPageIndex = Math.max(0, totalPages - 1);
+    if (page > maxPageIndex) {
+      updateClientsSearch({
+        page: maxPageIndex > 0 ? maxPageIndex + 1 : undefined,
+      });
+    }
+  }, [totalPages, totalCount, isPending, page]);
 
   const isLoadingClients = !isProfileReady || isPending || isFetching;
 
   const { data: agentOptions = [], isLoading: agentsLoading } = useQuery({
-    queryKey: ["agent-profiles-bulk-assign"],
+    queryKey: ["agent-profiles-owner-select"],
     queryFn: fetchAgentsForOwnerSelect,
-    enabled: isProfileReady && canAssign,
+    enabled: isProfileReady,
     staleTime: 60_000,
   });
+
+  const { data: affiliateOptions = [] } = useQuery({
+    queryKey: ["affiliate-filter-options"],
+    queryFn: fetchAffiliateOptions,
+    enabled: isProfileReady,
+    staleTime: 300_000,
+  });
+
+  const countryOptions = useMemo(() => getSupportedCountryFilterOptions(), []);
+
+  const ownerFilterOptions = useMemo(
+    () => ["Sin asignar", ...agentOptions.map((agent) => agent.label)],
+    [agentOptions],
+  );
 
   const bulkOwnerMutation = useMutation({
     mutationFn: ({
@@ -364,6 +508,24 @@ function ClientsPage() {
       }
       toast.error(
         err instanceof Error ? err.message : "Error al asignar el asesor.",
+      );
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["secure-clients"] });
+    },
+  });
+
+  const bulkDeleteMutation = useMutation({
+    mutationFn: bulkDeleteClients,
+    onSuccess: (_data, phones) => {
+      toast.success(`${phones.length} clientes eliminados correctamente`);
+      setSelectedPhones(new Set());
+      setDeleteOpen(false);
+      setDeleteConfirmText("");
+    },
+    onError: (err) => {
+      toast.error(
+        err instanceof Error ? err.message : "Error al eliminar clientes.",
       );
     },
     onSettled: () => {
@@ -418,12 +580,23 @@ function ClientsPage() {
 
   const handleSort = (column: SecureClientColumn, direction: SortDirection) => {
     setSort({ column, direction });
+    resetPageInUrl();
+  };
+
+  const handleFiltersChange = (next: SecureClientFilters) => {
+    setFilters(next);
+    resetPageInUrl();
   };
 
   const allSelected =
     clients.length > 0 && selectedPhones.size === clients.length;
   const multiSelected = selectedPhones.size >= 2;
-  const isBulkProcessing = bulkMutation.isPending || bulkOwnerMutation.isPending;
+  const hasSelection = selectedPhones.size >= 1;
+  const isBulkProcessing =
+    bulkMutation.isPending ||
+    bulkOwnerMutation.isPending ||
+    bulkDeleteMutation.isPending;
+  const deleteConfirmReady = deleteConfirmText.trim() === "ELIMINAR";
 
   const toggleAll = () => {
     if (allSelected) {
@@ -433,20 +606,42 @@ function ClientsPage() {
     setSelectedPhones(new Set(clients.map((c) => c.phone)));
   };
 
-  const toggleRow = (phone: string) => {
+  const toggleRow = useCallback((phone: string) => {
     setSelectedPhones((prev) => {
       const next = new Set(prev);
       if (next.has(phone)) next.delete(phone);
       else next.add(phone);
       return next;
     });
-  };
+  }, []);
+
+  const openClientDetail = useCallback(
+    (phone: string, options?: { edit?: boolean }) => {
+      navigate({
+        to: "/clients/$id",
+        params: { id: clientDetailIdFromPhone(phone) },
+        search: (prev) => ({
+          ...prev,
+          search: undefined,
+          q: undefined,
+          edit: options?.edit ? ("1" as const) : undefined,
+        }),
+      });
+    },
+    [navigate],
+  );
 
   const handleBulkSubmit = () => {
     const phones = Array.from(selectedPhones);
     if (phones.length === 0) return;
     const leadStatus = normalizeLeadStatus(bulkStatus, { strict: true });
     bulkMutation.mutate({ phones, leadStatus });
+  };
+
+  const handleBulkDelete = () => {
+    const phones = Array.from(selectedPhones);
+    if (phones.length === 0 || !deleteConfirmReady) return;
+    bulkDeleteMutation.mutate(phones);
   };
 
   const handleBulkAssignOwner = () => {
@@ -457,14 +652,6 @@ function ClientsPage() {
       return;
     }
     bulkOwnerMutation.mutate({ phones, ownerId: bulkAssignAgentId });
-  };
-
-  const openClientDetail = (phone: string, options?: { edit?: boolean }) => {
-    navigate({
-      to: "/clients/$id",
-      params: { id: clientDetailIdFromPhone(phone) },
-      search: options?.edit ? { edit: "1" } : {},
-    });
   };
 
   const handleExportExcel = () => {
@@ -503,6 +690,18 @@ function ClientsPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 shrink-0">
+          {canBulkDelete && hasSelection && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setDeleteOpen(true)}
+              disabled={isBulkProcessing}
+              className="border-destructive/40 text-destructive hover:bg-destructive/10"
+            >
+              <Trash2 className="h-4 w-4" />
+              Eliminar Seleccionados ({selectedPhones.size})
+            </Button>
+          )}
           {canExport && (
             <Button
               type="button"
@@ -601,7 +800,7 @@ function ClientsPage() {
           <span>Clientes por página</span>
           <Select
             value={String(pageSize)}
-            onValueChange={(v) => setPageSize(Number(v) as ClientPageSize)}
+            onValueChange={(v) => handlePageSizeChange(Number(v) as ClientPageSize)}
             disabled={isLoadingClients}
           >
             <SelectTrigger className="h-9 w-[88px] bg-surface-elevated border-border">
@@ -624,7 +823,7 @@ function ClientsPage() {
               size="sm"
               className="h-9 w-9 p-0"
               disabled={page <= 0 || isBulkProcessing}
-              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              onClick={() => goToPage(page - 1)}
               aria-label="Página anterior"
             >
               <ArrowLeft className="h-4 w-4" />
@@ -638,7 +837,7 @@ function ClientsPage() {
               size="sm"
               className="h-9 w-9 p-0"
               disabled={page >= totalPages - 1 || isBulkProcessing}
-              onClick={() => setPage((p) => p + 1)}
+              onClick={() => goToPage(page + 1)}
               aria-label="Página siguiente"
             >
               <ArrowRight className="h-4 w-4" />
@@ -662,7 +861,7 @@ function ClientsPage() {
           <table className="w-full text-sm min-w-[1800px]">
             <thead className="bg-surface-elevated/60 text-xs uppercase tracking-wider text-muted-foreground">
               <tr>
-                {canAssign && (
+                {canBulkDelete && (
                   <th
                     data-bulk-select-cell
                     className="w-10 px-3 py-3"
@@ -673,7 +872,7 @@ function ClientsPage() {
                       onCheckedChange={toggleAll}
                       onClick={(e) => e.stopPropagation()}
                       disabled={isBulkProcessing}
-                      aria-label="Seleccionar todos"
+                      aria-label="Seleccionar todos los clientes de la página actual"
                     />
                   </th>
                 )}
@@ -697,7 +896,7 @@ function ClientsPage() {
                 </th>
               </tr>
               <tr className="border-t border-border/60 normal-case tracking-normal">
-                {canAssign && <th className="px-3 py-1.5 w-10" />}
+                {canBulkDelete && <th className="px-3 py-1.5 w-10" />}
                 {visibleColumns.map((col) => (
                   <th
                     key={`filter-${col.key}`}
@@ -707,7 +906,10 @@ function ClientsPage() {
                       <ColumnFilter
                         col={col}
                         filters={filters}
-                        onChange={setFilters}
+                        onChange={handleFiltersChange}
+                        countryOptions={countryOptions}
+                        affiliateOptions={affiliateOptions}
+                        ownerOptions={ownerFilterOptions}
                       />
                     </div>
                   </th>
@@ -786,7 +988,7 @@ function ClientsPage() {
                         isSelected && "bg-primary/5",
                       )}
                     >
-                      {canAssign && (
+                      {canBulkDelete && (
                         <td
                           data-bulk-select-cell
                           className="px-3 py-3 w-10"
@@ -797,7 +999,7 @@ function ClientsPage() {
                             onCheckedChange={() => toggleRow(row.phone)}
                             onClick={(e) => e.stopPropagation()}
                             disabled={isBulkProcessing}
-                            aria-label={`Seleccionar cliente`}
+                            aria-label="Seleccionar cliente"
                           />
                         </td>
                       )}
@@ -876,7 +1078,7 @@ function ClientsPage() {
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                initiateLocalPhoneCall(row.phone);
+                                void callClient(row.phone);
                               }}
                               className="h-8 w-8 rounded-md bg-success/15 hover:bg-success/25 text-success border border-success/30 flex items-center justify-center"
                               aria-label="Llamar"
@@ -910,7 +1112,7 @@ function ClientsPage() {
             <span className="text-sm text-muted-foreground">Por página</span>
             <Select
               value={String(pageSize)}
-              onValueChange={(v) => setPageSize(Number(v) as ClientPageSize)}
+              onValueChange={(v) => handlePageSizeChange(Number(v) as ClientPageSize)}
             >
               <SelectTrigger className="h-9 w-[88px] bg-surface-elevated border-border">
                 <SelectValue />
@@ -929,7 +1131,7 @@ function ClientsPage() {
               size="sm"
               className="h-9 w-9 p-0"
               disabled={page <= 0}
-              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              onClick={() => goToPage(page - 1)}
               aria-label="Página anterior"
             >
               <ArrowLeft className="h-4 w-4" />
@@ -943,7 +1145,7 @@ function ClientsPage() {
               size="sm"
               className="h-9 w-9 p-0"
               disabled={page >= totalPages - 1}
-              onClick={() => setPage((p) => p + 1)}
+              onClick={() => goToPage(page + 1)}
               aria-label="Página siguiente"
             >
               <ArrowRight className="h-4 w-4" />
@@ -951,6 +1153,60 @@ function ClientsPage() {
           </div>
         </div>
       )}
+
+      <Dialog
+        open={deleteOpen}
+        onOpenChange={(open) => {
+          setDeleteOpen(open);
+          if (!open) setDeleteConfirmText("");
+        }}
+      >
+        <DialogContent className="max-w-md bg-card border-border">
+          <DialogHeader>
+            <DialogTitle>Eliminar clientes seleccionados</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm font-medium text-destructive">
+            ¡Atención! Estás a punto de eliminar {selectedPhones.size} cliente
+            {selectedPhones.size === 1 ? "" : "s"} de forma permanente. Esta
+            acción no se puede deshacer. Escribe la palabra &apos;ELIMINAR&apos;
+            para confirmar.
+          </p>
+          <Input
+            value={deleteConfirmText}
+            onChange={(e) => setDeleteConfirmText(e.target.value)}
+            placeholder="ELIMINAR"
+            className="bg-surface-elevated border-border"
+            autoComplete="off"
+            disabled={bulkDeleteMutation.isPending}
+          />
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDeleteOpen(false);
+                setDeleteConfirmText("");
+              }}
+              disabled={bulkDeleteMutation.isPending}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleBulkDelete}
+              disabled={!deleteConfirmReady || bulkDeleteMutation.isPending}
+            >
+              {bulkDeleteMutation.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Eliminando…
+                </>
+              ) : (
+                "Eliminar permanentemente"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={bulkOpen} onOpenChange={setBulkOpen}>
         <DialogContent className="max-w-md bg-card border-border">

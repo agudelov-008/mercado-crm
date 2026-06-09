@@ -1,8 +1,17 @@
+import { useEffect, useRef, useState } from "react";
 import { Search, ChevronDown, LogOut } from "lucide-react";
+import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { useApp } from "@/lib/app-context";
 import { useAuth } from "@/lib/auth-context";
 import { BRAND_LOGO_SOLO, BRAND_NAME } from "@/lib/brand";
+import {
+  isClientDetailPath,
+  isClientsIndexPath,
+  mergeClientsIndexSearch,
+  readClientsIndexSearch,
+} from "@/lib/clients-route-search";
 import { getProfileRoleLabel } from "@/lib/role-rbac";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,12 +22,81 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 
+const GLOBAL_SEARCH_DEBOUNCE_MS = 300;
+
 export function Topbar() {
   const { profileRole, currentUser } = useApp();
   const { handleLogout } = useAuth();
+  const navigate = useNavigate();
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const urlSearchTerm = useRouterState({
+    select: (state) =>
+      isClientsIndexPath(state.location.pathname)
+        ? readClientsIndexSearch(
+            state.location.search as Record<string, unknown>,
+          )
+        : null,
+  });
+
+  const [inputValue, setInputValue] = useState("");
+  const debouncedSearch = useDebouncedValue(inputValue, GLOBAL_SEARCH_DEBOUNCE_MS);
+  const isOnClientsIndex = isClientsIndexPath(pathname);
+  const isOnClientDetail = isClientDetailPath(pathname);
+  const isUserTypingRef = useRef(false);
 
   const roleLabel =
     profileRole !== null ? getProfileRoleLabel(profileRole) : "…";
+
+  // Sync input from URL only on the clients list route.
+  useEffect(() => {
+    if (!isOnClientsIndex || urlSearchTerm === null) return;
+    isUserTypingRef.current = false;
+    setInputValue(urlSearchTerm);
+  }, [urlSearchTerm, isOnClientsIndex]);
+
+  // Push debounced input to URL only when the user is actively typing.
+  useEffect(() => {
+    if (isOnClientDetail || !isUserTypingRef.current) return;
+
+    const trimmed = debouncedSearch.trim();
+
+    if (isOnClientsIndex) {
+      const current = (urlSearchTerm ?? "").trim();
+      if (trimmed === current) {
+        isUserTypingRef.current = false;
+        return;
+      }
+
+      void navigate({
+        to: "/clients",
+        search: (prev) =>
+          mergeClientsIndexSearch(prev, {
+            search: trimmed || undefined,
+            page: undefined,
+          }),
+        replace: true,
+      });
+      isUserTypingRef.current = false;
+      return;
+    }
+
+    if (trimmed) {
+      void navigate({
+        to: "/clients",
+        search: (prev) =>
+          mergeClientsIndexSearch(prev, {
+            search: trimmed,
+            page: undefined,
+          }),
+      });
+    }
+    isUserTypingRef.current = false;
+  }, [debouncedSearch, isOnClientDetail, isOnClientsIndex, navigate, urlSearchTerm]);
+
+  const handleSearchChange = (value: string) => {
+    isUserTypingRef.current = true;
+    setInputValue(value);
+  };
 
   return (
     <header className="h-16 border-b border-border bg-surface/60 backdrop-blur flex items-center px-4 md:px-6 gap-4">
@@ -31,8 +109,11 @@ export function Topbar() {
       <div className="relative flex-1 max-w-md">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
+          value={inputValue}
+          onChange={(e) => handleSearchChange(e.target.value)}
           placeholder="Search clients, deals…"
           className="pl-9 bg-surface-elevated border-border h-9"
+          aria-label="Búsqueda global de clientes"
         />
       </div>
 

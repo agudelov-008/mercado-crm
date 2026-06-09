@@ -23,21 +23,23 @@ export function getProfileRoleLabel(role: ProfileRole): string {
   }
 }
 
-/**
- * Enmascaramiento visual (asteriscos) en tabla y detalle de cliente.
- * Solo aplica al rol `Agent`. Asistente, CRM, Admin y Affiliate ven texto plano.
- */
-export function shouldMaskContactInUi(role: ProfileRole | null): boolean {
-  return role === "Agent";
+/** El Agente no ve teléfono ni correo del cliente en ninguna pantalla. */
+export function canViewClientContactInUi(role: ProfileRole | null): boolean {
+  return role !== null && role !== "Agent";
+}
+
+/** @deprecated El Agente ya no ve contacto; el enmascaramiento no aplica a ningún rol. */
+export function shouldMaskContactInUi(_role: ProfileRole | null): boolean {
+  return false;
 }
 
 export function canAssignClients(role: ProfileRole | null): boolean {
   return role === "Admin" || role === "Manager";
 }
 
-/** Subida de bases e importación masiva: solo Admin. */
+/** Subida de bases e importación masiva: Admin y Afiliadora (sus propios leads). */
 export function canImportClientBases(role: ProfileRole | null): boolean {
-  return role === "Admin";
+  return role === "Admin" || role === "Affiliate";
 }
 
 export function canAddManualClient(role: ProfileRole | null): boolean {
@@ -102,20 +104,39 @@ export function canEditClientProfile(role: ProfileRole | null): boolean {
   return role === "Admin";
 }
 
+/** Eliminación masiva de clientes: exclusivamente Admin. */
+export function canBulkDeleteClients(role: ProfileRole | null): boolean {
+  return role === "Admin";
+}
+
 const RESTRICTED_COLUMNS_FOR_FIELD_ROLES: SecureClientColumn[] = [
-  "owner_id",
-  "previous_owner_id",
+  "owner_name",
+  "previous_owner_name",
+];
+
+const HIDDEN_CONTACT_COLUMNS_FOR_AGENT: SecureClientColumn[] = [
+  "phone",
+  "email",
 ];
 
 export function getVisibleClientTableColumns(
   role: ProfileRole | null,
 ): ClientTableColumnDef[] {
+  let columns = CLIENT_TABLE_COLUMNS;
+
   if (role === "Agent" || role === "Affiliate") {
-    return CLIENT_TABLE_COLUMNS.filter(
+    columns = columns.filter(
       (col) => !RESTRICTED_COLUMNS_FOR_FIELD_ROLES.includes(col.key),
     );
   }
-  return CLIENT_TABLE_COLUMNS;
+
+  if (role === "Agent") {
+    columns = columns.filter(
+      (col) => !HIDDEN_CONTACT_COLUMNS_FOR_AGENT.includes(col.key),
+    );
+  }
+
+  return columns;
 }
 
 export function canAccessDashboardNav(role: ProfileRole | null): boolean {
@@ -132,7 +153,7 @@ export function canInitiateClientCall(role: ProfileRole | null): boolean {
   return role !== null && role !== "Affiliate";
 }
 
-/** Calendario global: visible para todos los roles (Affiliate en solo lectura). */
+/** Calendario global: visible para todos los roles excepto Afiliadora. */
 export function canAccessTasksNav(role: ProfileRole | null): boolean {
-  return role !== null;
+  return role !== null && role !== "Affiliate";
 }

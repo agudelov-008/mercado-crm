@@ -1,12 +1,13 @@
 import type { ReactNode } from "react";
 import { useEffect } from "react";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
+import { useClientsRealtime } from "@/hooks/use-dashboard-realtime";
 import { useApp } from "@/lib/app-context";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 import { MarketTicker } from "./MarketTicker";
 
-const AFFILIATE_ALLOWED_PREFIXES = ["/clients", "/tasks", "/calendar"] as const;
+const AFFILIATE_ALLOWED_PREFIXES = ["/clients"] as const;
 
 function isAffiliateAllowedPath(pathname: string): boolean {
   return AFFILIATE_ALLOWED_PREFIXES.some((prefix) => pathname.startsWith(prefix));
@@ -16,6 +17,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { profileRole } = useApp();
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
+
+  useClientsRealtime();
 
   useEffect(() => {
     if (profileRole !== "Affiliate") return;

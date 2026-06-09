@@ -26,7 +26,7 @@ import { ClientCard } from "@/components/ClientCard";
 
 import { openWhatsAppChat } from "@/lib/whatsapp";
 
-import { initiateLocalPhoneCall } from "@/lib/local-call";
+import { useClientCall } from "@/hooks/use-client-call";
 
 import type { Client } from "@/lib/mock-data";
 
@@ -62,19 +62,13 @@ import {
 
 import { appointmentsQueryOptions } from "@/hooks/use-appointments-realtime";
 
-import {
-
-  dashboardQueryOptions,
-
-  useDashboardRealtime,
-
-} from "@/hooks/use-dashboard-realtime";
+import { dashboardQueryOptions } from "@/hooks/use-dashboard-realtime";
 
 import {
 
   clientDetailIdFromPhone,
 
-  formatClientDate,
+  formatLastContacted,
 
   type SecureClientWithOwners,
 
@@ -158,7 +152,7 @@ function secureClientToCardClient(row: SecureClientWithOwners): Client {
 
     lastContact: row.last_contacted
 
-      ? formatClientDate(row.last_contacted)
+      ? formatLastContacted(row.last_contacted)
 
       : "—",
 
@@ -309,9 +303,7 @@ function Dashboard() {
 
   const canCall = canInitiateClientCall(profileRole);
 
-
-
-  useDashboardRealtime();
+  const { callClient } = useClientCall();
 
 
 
@@ -327,13 +319,12 @@ function Dashboard() {
 
   } = useQuery({
 
-    queryKey: ["dashboard-metrics", user?.id],
+    queryKey: ["dashboard-metrics", user?.id, isAgent],
 
-    queryFn: fetchDashboardMetrics,
+    queryFn: () =>
+      fetchDashboardMetrics(isAgent && user?.id ? user.id : undefined),
 
     enabled: isProfileReady,
-
-    staleTime: 30_000,
 
     ...dashboardQueryOptions,
 
@@ -379,13 +370,12 @@ function Dashboard() {
 
   } = useQuery({
 
-    queryKey: ["dashboard-priority-clients", user?.id],
+    queryKey: ["dashboard-priority-clients", user?.id, isAgent],
 
-    queryFn: () => fetchPriorityClients(6),
+    queryFn: () =>
+      fetchPriorityClients(6, isAgent && user?.id ? user.id : undefined),
 
     enabled: isProfileReady,
-
-    staleTime: 30_000,
 
     ...dashboardQueryOptions,
 
@@ -673,18 +663,16 @@ function Dashboard() {
 
                   showCallButton={canCall}
 
-                  onCall={() => initiateLocalPhoneCall(c.phone)}
+                  onCall={() => void callClient(c.phone)}
 
                   onMessage={() => openWhatsAppChat(c.phone)}
 
                   onOpen={() =>
 
                     navigate({
-
                       to: "/clients/$id",
-
                       params: { id: clientDetailIdFromPhone(c.phone) },
-
+                      search: () => ({}),
                     })
 
                   }

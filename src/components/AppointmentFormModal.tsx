@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarClock, Hash, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useAuth } from "@/lib/auth-context";
 import { supabase } from "@/lib/supabase";
 import {
@@ -134,6 +135,7 @@ export function AppointmentFormModal({
       );
     },
     enabled: open && assignedOwnerProp === undefined && Boolean(clientPhone),
+    staleTime: 60_000,
   });
 
   const assignedOwner =
@@ -357,6 +359,7 @@ export function GlobalAppointmentCreateModal({
 }: GlobalAppointmentCreateModalProps) {
   const [step, setStep] = useState<"client" | "form">("client");
   const [typedTP, setTypedTP] = useState("");
+  const debouncedTP = useDebouncedValue(typedTP, 300);
   const [selectedClient, setSelectedClient] = useState<AppointmentClientPick | null>(
     null,
   );
@@ -370,22 +373,23 @@ export function GlobalAppointmentCreateModal({
   }, [open]);
 
   const { data: clientMatches = [], isFetching } = useQuery({
-    queryKey: ["appointment-client-tp-search", typedTP.trim()],
+    queryKey: ["appointment-client-tp-search", debouncedTP.trim()],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("secure_clients")
         .select(`phone, first_name, last_name, tp_account, ${CLIENT_OWNER_SELECT}`)
-        .ilike("tp_account", `%${typedTP.trim()}%`)
+        .ilike("tp_account", `%${debouncedTP.trim()}%`)
         .limit(TP_SEARCH_LIMIT);
 
       if (error) throw error;
       return (data ?? []) as AppointmentClientPick[];
     },
-    enabled: typedTP.trim().length >= TP_SEARCH_MIN_LENGTH,
+    enabled: debouncedTP.trim().length >= TP_SEARCH_MIN_LENGTH,
+    staleTime: 10_000,
   });
 
   const showMatchesDropdown =
-    typedTP.trim().length >= TP_SEARCH_MIN_LENGTH && clientMatches.length > 0;
+    debouncedTP.trim().length >= TP_SEARCH_MIN_LENGTH && clientMatches.length > 0;
 
   if (step === "form" && selectedClient) {
     return (
@@ -426,7 +430,7 @@ export function GlobalAppointmentCreateModal({
             className="bg-surface-elevated border-border font-mono"
             autoComplete="off"
           />
-          {isFetching && typedTP.trim().length >= TP_SEARCH_MIN_LENGTH && (
+          {isFetching && debouncedTP.trim().length >= TP_SEARCH_MIN_LENGTH && (
             <p className="text-xs text-muted-foreground flex items-center gap-1.5">
               <Loader2 className="h-3 w-3 animate-spin" />
               Buscando…

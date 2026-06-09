@@ -4,6 +4,7 @@ import { shouldStripContactFromExcelExport } from "@/lib/role-rbac";
 import {
   formatClientDate,
   formatClientDateTime,
+  formatLastContacted,
   formatOwnerDisplayName,
 } from "@/lib/secure-clients";
 import type { SecureClientWithOwners } from "@/lib/secure-clients";
@@ -27,7 +28,7 @@ function rowToExportRecord(row: SecureClientWithOwners): Record<string, string |
     "Previous Owner": formatOwnerDisplayName(row.previous_owner),
     "Created On": formatClientDate(row.created_on),
     "Last Assignment": formatClientDateTime(row.last_assignment),
-    "Last Contacted": formatClientDate(row.last_contacted),
+    "Last Contacted": formatLastContacted(row.last_contacted),
     "Updated At": formatClientDate(row.updated_at),
   };
 }

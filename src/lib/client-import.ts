@@ -1,6 +1,12 @@
 import * as XLSX from "xlsx";
 import { supabase } from "@/lib/supabase";
-import { normalizeLeadStatus, type LeadStatus } from "@/lib/secure-clients";
+import {
+  formatOwnerDisplayName,
+  normalizeLeadStatus,
+  normalizeOwnerProfile,
+  type LeadStatus,
+  type SecureClientOwnerProfile,
+} from "@/lib/secure-clients";
 
 export type ImportableClientField =
   | "first_name"
@@ -34,6 +40,45 @@ export const IMPORTABLE_CLIENT_FIELDS: ImportableFieldDef[] = [
 export type ColumnMapping = Partial<Record<ImportableClientField, string>>;
 
 export type DuplicateResolution = "skip" | "overwrite";
+
+/** Decisión por teléfono al resolver un duplicado contra el CRM. */
+export type PerDuplicateResolution = "skip" | "overwrite";
+
+/** Cliente existente en Supabase (snapshot para comparar con el Excel). */
+export interface ExistingClientSnapshot {
+  phone: string;
+  first_name: string | null;
+  last_name: string | null;
+  lead_status: string | null;
+  affiliate: string | null;
+  email: string | null;
+  owner_name: string | null;
+  owner: SecureClientOwnerProfile | null;
+}
+
+/** Error cuando Postgres rechaza un INSERT por teléfono duplicado (23505). */
+export class ImportDuplicateKeyError extends Error {
+  readonly phones: string[];
+
+  constructor(message: string, phones: string[]) {
+    super(message);
+    this.name = "ImportDuplicateKeyError";
+    this.phones = phones;
+  }
+}
+
+/** Conflicto entre una fila del Excel y un cliente ya persistido. */
+export interface CrmDuplicateConflict {
+  phone: string;
+  excelRow: ClientImportRow;
+  existing: ExistingClientSnapshot;
+}
+
+/** Resultado de separar el lote en nuevos registros y duplicados del CRM. */
+export interface ImportPartitionResult {
+  nuevosClientes: ClientImportRow[];
+  clientesDuplicados: CrmDuplicateConflict[];
+}
 
 export interface ParsedSpreadsheet {
   fileName: string;
@@ -76,6 +121,8 @@ export interface BulkImportResult {
   inserted: number;
   updated: number;
   skipped: number;
+  /** Actualizaciones bloqueadas por RLS u otro error individual. */
+  denied: number;
 }
 
 const CHUNK_SIZE = 200;
@@ -141,17 +188,92 @@ function cellToString(value: unknown): string {
   if (value === null || value === undefined) return "";
   if (typeof value === "string") return value.trim();
   if (typeof value === "number" && Number.isFinite(value)) {
+    if (Number.isInteger(value)) {
+      return String(Math.trunc(value));
+    }
     return String(value);
   }
   return String(value).trim();
 }
 
+/** Clave canónica para comparar existencia (solo dígitos). */
+export function phoneComparisonKey(value: string): string {
+  return value.replace(/\D/g, "");
+}
+
+/**
+ * Normaliza teléfonos antes de consultar o persistir.
+ * Elimina espacios, guiones, paréntesis y puntos; conserva "+" inicial si existe.
+ */
 function normalizePhone(value: string): string {
-  return value.replace(/\s+/g, "").trim();
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+
+  const hasLeadingPlus = trimmed.startsWith("+");
+  const digits = trimmed.replace(/\D/g, "");
+  if (!digits) return "";
+
+  return hasLeadingPlus ? `+${digits}` : digits;
+}
+
+/** Variantes de un teléfono para maximizar coincidencias en `.in('phone', ...)`. */
+function phoneQueryVariants(value: string): string[] {
+  const trimmed = value.trim();
+  const normalized = normalizePhone(value);
+  const variants = new Set<string>();
+
+  if (trimmed) variants.add(trimmed);
+  if (normalized) variants.add(normalized);
+
+  const digits = phoneComparisonKey(normalized || trimmed);
+  if (digits) {
+    variants.add(digits);
+    variants.add(`+${digits}`);
+  }
+
+  return [...variants];
 }
 
 function normalizeEmail(value: string): string {
   return value.trim().toLowerCase();
+}
+
+/** Indicativos ordenados de mayor a menor longitud para evitar falsos positivos. */
+const PHONE_COUNTRY_PREFIXES: ReadonlyArray<{ prefix: string; country: string }> = [
+  { prefix: "593", country: "ecuador Ecuador" },
+  { prefix: "591", country: "bolivia Bolivia" },
+  { prefix: "504", country: "honduras Honduras" },
+  { prefix: "503", country: "salvador El Salvador" },
+  { prefix: "502", country: "guatemala Guatemala" },
+  { prefix: "52", country: "mx México" },
+  { prefix: "51", country: "peru Perú" },
+  { prefix: "56", country: "chile Chile" },
+  { prefix: "57", country: "co Colombia" },
+];
+
+function detectCountryFromPhoneDigits(digits: string): string | null {
+  if (!digits) return null;
+
+  for (const { prefix, country } of PHONE_COUNTRY_PREFIXES) {
+    if (digits.startsWith(prefix)) return country;
+  }
+
+  return null;
+}
+
+/** Infiere el país estandarizado a partir del indicativo telefónico. */
+export function detectCountryFromPhone(phone: string): string | null {
+  return detectCountryFromPhoneDigits(phoneComparisonKey(phone));
+}
+
+function resolveImportCountry(
+  excelCountry: string | null | undefined,
+  phone: string,
+): string | null {
+  const trimmed = excelCountry?.trim() ?? "";
+  if (trimmed) return trimmed;
+
+  return detectCountryFromPhoneDigits(phoneComparisonKey(phone));
 }
 
 export function isAcceptedImportFile(file: File): boolean {
@@ -249,6 +371,9 @@ export function buildImportRows(
     const phone = normalizePhone(getMapped("phone"));
     if (!phone) continue;
 
+    const excelCountry = getMapped("country").trim();
+    const country = resolveImportCountry(excelCountry, phone);
+
     const rowAffiliate =
       options.forcedAffiliate?.trim() ||
       getMapped("affiliate").trim() ||
@@ -260,7 +385,7 @@ export function buildImportRows(
       sanitizeClientImportRow({
         first_name: getMapped("first_name"),
         last_name: getMapped("last_name"),
-        country: getMapped("country"),
+        country,
         affiliate: rowAffiliate,
         tp_account: getMapped("tp_account"),
         phone,
@@ -273,25 +398,45 @@ export function buildImportRows(
     );
   }
 
-  return result;
+  return dedupeIntraFileByPhone(result);
+}
+
+/** Conserva la primera fila por teléfono (clave solo-dígitos) dentro del lote Excel. */
+export function dedupeIntraFileByPhone(rows: ClientImportRow[]): ClientImportRow[] {
+  const seen = new Set<string>();
+  const unique: ClientImportRow[] = [];
+
+  for (const row of rows) {
+    const key = phoneComparisonKey(row.phone);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    unique.push({ ...row, sourceIndex: unique.length });
+  }
+
+  return unique;
 }
 
 /** Agrupa teléfonos repetidos dentro del mismo archivo Excel. */
 export function detectIntraFileDuplicates(
   rows: ClientImportRow[],
 ): IntraFileConflict[] {
-  const byPhone = new Map<string, ClientImportRow[]>();
+  const byKey = new Map<string, ClientImportRow[]>();
 
   for (const row of rows) {
-    const group = byPhone.get(row.phone) ?? [];
+    const key = phoneComparisonKey(row.phone);
+    if (!key) continue;
+    const group = byKey.get(key) ?? [];
     group.push(row);
-    byPhone.set(row.phone, group);
+    byKey.set(key, group);
   }
 
   const conflicts: IntraFileConflict[] = [];
-  for (const [phone, candidates] of byPhone) {
+  for (const [, candidates] of byKey) {
     if (candidates.length > 1) {
-      conflicts.push({ phone, candidates });
+      conflicts.push({
+        phone: candidates[0]?.phone ?? "",
+        candidates,
+      });
     }
   }
 
@@ -303,14 +448,15 @@ export function applyIntraFileSelections(
   rows: ClientImportRow[],
   selections: Record<string, number>,
 ): ClientImportRow[] {
-  const conflictPhones = new Set(Object.keys(selections));
+  const conflictKeys = new Set(Object.keys(selections));
 
-  return rows
-    .filter((row) => {
-      if (!conflictPhones.has(row.phone)) return true;
-      return selections[row.phone] === row.sourceIndex;
-    })
-    .map((row, index) => ({ ...row, sourceIndex: index }));
+  return dedupeIntraFileByPhone(
+    rows.filter((row) => {
+      const key = phoneComparisonKey(row.phone);
+      if (!conflictKeys.has(key)) return true;
+      return selections[key] === row.sourceIndex;
+    }),
+  );
 }
 
 export function getDefaultIntraSelections(
@@ -318,28 +464,303 @@ export function getDefaultIntraSelections(
 ): Record<string, number> {
   const selections: Record<string, number> = {};
   for (const conflict of conflicts) {
-    selections[conflict.phone] = conflict.candidates[0]?.sourceIndex ?? 0;
+    const key = phoneComparisonKey(conflict.phone);
+    if (!key) continue;
+    selections[key] = conflict.candidates[0]?.sourceIndex ?? 0;
   }
   return selections;
 }
 
-export async function fetchExistingPhones(phones: string[]): Promise<Set<string>> {
-  const found = new Set<string>();
-  if (phones.length === 0) return found;
+export interface ExistingPhoneIndex {
+  /** Claves solo-dígitos presentes en la BD. */
+  comparisonKeys: Set<string>;
+  /** Teléfono PK real en BD por clave de comparación. */
+  canonicalByKey: Map<string, string>;
+}
 
-  for (let i = 0; i < phones.length; i += CHUNK_SIZE) {
-    const chunk = phones.slice(i, i + CHUNK_SIZE);
+function mergePhoneIndexes(...indexes: ExistingPhoneIndex[]): ExistingPhoneIndex {
+  const comparisonKeys = new Set<string>();
+  const canonicalByKey = new Map<string, string>();
+
+  for (const index of indexes) {
+    for (const key of index.comparisonKeys) {
+      comparisonKeys.add(key);
+      const canonical = index.canonicalByKey.get(key);
+      if (canonical) canonicalByKey.set(key, canonical);
+    }
+  }
+
+  return { comparisonKeys, canonicalByKey };
+}
+
+async function queryPhoneIndexFromTable(
+  table: "clients" | "secure_clients",
+  queryVariants: string[],
+): Promise<ExistingPhoneIndex> {
+  const comparisonKeys = new Set<string>();
+  const canonicalByKey = new Map<string, string>();
+  if (queryVariants.length === 0) {
+    return { comparisonKeys, canonicalByKey };
+  }
+
+  for (let i = 0; i < queryVariants.length; i += CHUNK_SIZE) {
+    const chunk = queryVariants.slice(i, i + CHUNK_SIZE);
     const { data, error } = await supabase
-      .from("clients")
+      .from(table)
       .select("phone")
       .in("phone", chunk);
 
     if (error) throw error;
+
     for (const row of data ?? []) {
-      if (row.phone) found.add(normalizePhone(String(row.phone)));
+      if (!row.phone) continue;
+      const canonical = String(row.phone);
+      const key = phoneComparisonKey(canonical);
+      if (!key) continue;
+      comparisonKeys.add(key);
+      canonicalByKey.set(key, canonical);
     }
   }
+
+  return { comparisonKeys, canonicalByKey };
+}
+
+/** Busca teléfonos existentes en `secure_clients` (visible al usuario) y `clients`. */
+export async function fetchExistingPhoneIndex(
+  phones: string[],
+): Promise<ExistingPhoneIndex> {
+  if (phones.length === 0) {
+    return { comparisonKeys: new Set(), canonicalByKey: new Map() };
+  }
+
+  const queryVariants = [
+    ...new Set(phones.flatMap((phone) => phoneQueryVariants(phone))),
+  ];
+
+  const [secureIndex, clientsIndex] = await Promise.all([
+    queryPhoneIndexFromTable("secure_clients", queryVariants),
+    queryPhoneIndexFromTable("clients", queryVariants),
+  ]);
+
+  return mergePhoneIndexes(secureIndex, clientsIndex);
+}
+
+export async function fetchExistingPhones(phones: string[]): Promise<Set<string>> {
+  const index = await fetchExistingPhoneIndex(phones);
+  return new Set(index.comparisonKeys);
+}
+
+function isPhoneRegistered(
+  phone: string,
+  index: ExistingPhoneIndex,
+): boolean {
+  const key = phoneComparisonKey(phone);
+  return key !== "" && index.comparisonKeys.has(key);
+}
+
+type ClientRowWithOwnerJoin = {
+  phone: string;
+  first_name: string | null;
+  last_name: string | null;
+  lead_status: string | null;
+  affiliate: string | null;
+  email: string | null;
+  owner_name?: string | null;
+  owner?: SecureClientOwnerProfile | SecureClientOwnerProfile[] | null;
+};
+
+function mapRowToExistingSnapshot(
+  row: ClientRowWithOwnerJoin,
+): ExistingClientSnapshot | null {
+  if (!row.phone) return null;
+  const canonical = String(row.phone);
+  const key = phoneComparisonKey(canonical);
+  if (!key) return null;
+
+  return {
+    phone: canonical,
+    first_name: row.first_name,
+    last_name: row.last_name,
+    lead_status: row.lead_status,
+    affiliate: row.affiliate,
+    email: row.email,
+    owner_name: row.owner_name ?? null,
+    owner: normalizeOwnerProfile(row.owner),
+  };
+}
+
+async function fetchClientSnapshotsFromTable(
+  table: "clients" | "secure_clients",
+  queryVariants: string[],
+): Promise<Map<string, ExistingClientSnapshot>> {
+  const found = new Map<string, ExistingClientSnapshot>();
+  if (queryVariants.length === 0) return found;
+
+  for (let i = 0; i < queryVariants.length; i += CHUNK_SIZE) {
+    const chunk = queryVariants.slice(i, i + CHUNK_SIZE);
+
+    if (table === "secure_clients") {
+      const { data, error } = await supabase
+        .from("secure_clients")
+        .select(
+          "phone, first_name, last_name, lead_status, affiliate, email, owner_name",
+        )
+        .in("phone", chunk);
+
+      if (error) throw error;
+
+      for (const row of data ?? []) {
+        const snapshot = mapRowToExistingSnapshot(row as ClientRowWithOwnerJoin);
+        if (!snapshot) continue;
+        found.set(phoneComparisonKey(snapshot.phone), snapshot);
+      }
+      continue;
+    }
+
+    const { data, error } = await supabase
+      .from("clients")
+      .select(
+        "phone, first_name, last_name, lead_status, affiliate, email, owner:profiles!owner_id(first_name, last_name, email)",
+      )
+      .in("phone", chunk);
+
+    if (error) throw error;
+
+    for (const row of (data ?? []) as unknown as ClientRowWithOwnerJoin[]) {
+      const snapshot = mapRowToExistingSnapshot(row);
+      if (!snapshot) continue;
+      found.set(phoneComparisonKey(snapshot.phone), snapshot);
+    }
+  }
+
   return found;
+}
+
+/** Registro devuelto por `check_crm_duplicates_v2` (bypass RLS para existencia global). */
+type CrmDuplicateRpcRecord = {
+  existing_phone: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  lead_status?: string | null;
+  affiliate?: string | null;
+  email?: string | null;
+  owner_name?: string | null;
+};
+
+function mapRpcRecordToSnapshot(rec: CrmDuplicateRpcRecord): ExistingClientSnapshot {
+  return {
+    phone: rec.existing_phone,
+    first_name: rec.first_name ?? null,
+    last_name: rec.last_name ?? null,
+    lead_status: rec.lead_status ?? null,
+    affiliate: rec.affiliate ?? null,
+    email: rec.email ?? null,
+    owner_name: rec.owner_name ?? null,
+    owner: null,
+  };
+}
+
+/**
+ * Consulta existencia real de teléfonos vía RPC (sin filtro RLS por asesor).
+ * `digitKeys` deben ser llaves solo-dígitos (`phoneComparisonKey`).
+ */
+async function fetchExistingClientsByDigitKeys(
+  digitKeys: string[],
+): Promise<Map<string, ExistingClientSnapshot>> {
+  const existingMap = new Map<string, ExistingClientSnapshot>();
+  if (digitKeys.length === 0) return existingMap;
+
+  const uniqueKeys = [...new Set(digitKeys)];
+
+  for (let i = 0; i < uniqueKeys.length; i += CHUNK_SIZE) {
+    const chunk = uniqueKeys.slice(i, i + CHUNK_SIZE);
+    const { data: existingRecords, error } = await supabase.rpc(
+      "check_crm_duplicates_v2",
+      { digit_keys: chunk },
+    );
+    if (error) throw error;
+
+    (existingRecords as CrmDuplicateRpcRecord[] | null)?.forEach((rec) => {
+      const cleanKey = rec.existing_phone.replace(/\D/g, "");
+      if (!cleanKey) return;
+      existingMap.set(cleanKey, mapRpcRecordToSnapshot(rec));
+    });
+  }
+
+  return existingMap;
+}
+
+/** Consulta clientes existentes por teléfono con datos para la UI de conflictos. */
+export async function fetchExistingClientsByPhones(
+  phones: string[],
+): Promise<Map<string, ExistingClientSnapshot>> {
+  const digitKeys = phones.map((phone) => phoneComparisonKey(phone)).filter(Boolean);
+  return fetchExistingClientsByDigitKeys(digitKeys);
+}
+
+/** Pre-validación: separa filas nuevas de las que chocan con teléfonos en `clients`. */
+export async function partitionImportByExistingClients(
+  rows: ClientImportRow[],
+): Promise<ImportPartitionResult> {
+  try {
+    const sanitizedRows = dedupeIntraFileByPhone(
+      rows.map((row) => sanitizeClientImportRow(row)),
+    );
+    const digitKeys = sanitizedRows
+      .map((r) => phoneComparisonKey(r.phone))
+      .filter(Boolean);
+    const existingByKey = await fetchExistingClientsByDigitKeys(digitKeys);
+
+    const nuevosClientes: ClientImportRow[] = [];
+    const clientesDuplicados: CrmDuplicateConflict[] = [];
+    const seenNewPhones = new Set<string>();
+
+    for (const row of sanitizedRows) {
+      const key = phoneComparisonKey(row.phone);
+      const existing = existingByKey.get(key);
+
+      if (existing) {
+        clientesDuplicados.push({
+          phone: row.phone,
+          excelRow: row,
+          existing,
+        });
+        continue;
+      }
+
+      if (seenNewPhones.has(key)) continue;
+      seenNewPhones.add(key);
+      nuevosClientes.push(row);
+    }
+
+    return { nuevosClientes, clientesDuplicados };
+  } catch (err) {
+    const message =
+      err instanceof Error
+        ? err.message
+        : "No se pudo validar duplicados en la base de datos.";
+    throw new Error(message);
+  }
+}
+
+export function getDefaultCrmResolutions(
+  conflicts: CrmDuplicateConflict[],
+): Record<string, PerDuplicateResolution> {
+  const resolutions: Record<string, PerDuplicateResolution> = {};
+  for (const conflict of conflicts) {
+    const key = phoneComparisonKey(conflict.phone);
+    if (!key) continue;
+    resolutions[key] = "skip";
+  }
+  return resolutions;
+}
+
+function resolveDuplicateAction(
+  phone: string,
+  resolutions: Record<string, PerDuplicateResolution>,
+): PerDuplicateResolution {
+  const key = phoneComparisonKey(phone);
+  return resolutions[key] ?? resolutions[phone] ?? "skip";
 }
 
 async function fetchExistingByEmails(emails: string[]): Promise<Set<string>> {
@@ -383,7 +804,8 @@ export async function checkImportDuplicates(
     const duplicateEmails = new Set<string>();
 
     for (const row of rows) {
-      if (existingPhones.has(row.phone)) {
+      const phoneKey = phoneComparisonKey(row.phone);
+      if (phoneKey && existingPhones.has(phoneKey)) {
         duplicatePhones.add(row.phone);
       }
       if (row.email && existingEmails.has(normalizeEmail(row.email))) {
@@ -412,9 +834,37 @@ export async function checkImportDuplicates(
   }
 }
 
+function isRlsPolicyError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code: string }).code === "42501"
+  );
+}
+
 async function insertChunk(rows: DbClientRow[]): Promise<void> {
   if (rows.length === 0) return;
   const { error } = await supabase.from("clients").insert(rows);
+  if (error) throw error;
+}
+
+type ClientUpdatePayload = Omit<DbClientRow, "phone">;
+
+function toUpdatePayload(row: DbClientRow): ClientUpdatePayload {
+  const { phone: _phone, ...fields } = row;
+  return fields;
+}
+
+async function updateClientByPhone(
+  row: DbClientRow,
+  phoneInDb: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from("clients")
+    .update(toUpdatePayload(row))
+    .eq("phone", phoneInDb);
+
   if (error) throw error;
 }
 
@@ -426,6 +876,96 @@ async function upsertChunk(rows: DbClientRow[]): Promise<void> {
   if (error) throw error;
 }
 
+/**
+ * Importación con resolución granular.
+ * - INSERT masivo: solo teléfonos nuevos (pasan RLS de inserción en bloque).
+ * - UPDATE individual: duplicados "overwrite" con Promise.allSettled (RLS por fila).
+ * - SKIP: excluidos de cualquier llamada a Supabase.
+ */
+export async function bulkImportWithResolutions(
+  nuevosClientes: ClientImportRow[],
+  clientesDuplicados: CrmDuplicateConflict[],
+  resolutions: Record<string, PerDuplicateResolution>,
+): Promise<BulkImportResult> {
+  try {
+    let skipped = 0;
+    const overwriteJobs: Array<{ row: DbClientRow; phoneInDb: string }> = [];
+
+    for (const conflict of clientesDuplicados) {
+      const key = phoneComparisonKey(conflict.phone);
+      if (!key) {
+        skipped += 1;
+        continue;
+      }
+
+      if (resolveDuplicateAction(conflict.phone, resolutions) === "overwrite") {
+        overwriteJobs.push({
+          row: sanitizeDbClientRow(conflict.excelRow),
+          phoneInDb: conflict.existing.phone,
+        });
+      } else {
+        skipped += 1;
+      }
+    }
+
+    const overwriteKeys = new Set(
+      overwriteJobs.map((job) => phoneComparisonKey(job.phoneInDb)),
+    );
+    const insertByKey = new Map<string, DbClientRow>();
+
+    for (const row of nuevosClientes) {
+      const sanitized = sanitizeDbClientRow(row);
+      const key = phoneComparisonKey(sanitized.phone);
+      if (!key || overwriteKeys.has(key) || insertByKey.has(key)) continue;
+      insertByKey.set(key, sanitized);
+    }
+
+    const toInsert = [...insertByKey.values()];
+    let inserted = 0;
+
+    for (let i = 0; i < toInsert.length; i += CHUNK_SIZE) {
+      const chunk = toInsert.slice(i, i + CHUNK_SIZE);
+      await insertChunk(chunk);
+      inserted += chunk.length;
+    }
+
+    let updated = 0;
+    let denied = 0;
+
+    if (overwriteJobs.length > 0) {
+      const results = await Promise.allSettled(
+        overwriteJobs.map(({ row, phoneInDb }) =>
+          updateClientByPhone(row, phoneInDb),
+        ),
+      );
+
+      for (const result of results) {
+        if (result.status === "fulfilled") {
+          updated += 1;
+          continue;
+        }
+
+        denied += 1;
+        if (!isRlsPolicyError(result.reason)) {
+          const message =
+            result.reason instanceof Error
+              ? result.reason.message
+              : "Error al actualizar un cliente duplicado.";
+          if (import.meta.env.DEV) {
+            console.warn("[import] actualización rechazada:", message);
+          }
+        }
+      }
+    }
+
+    return { inserted, updated, skipped, denied };
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "Error en la carga masiva de clientes.";
+    throw new Error(message);
+  }
+}
+
 export async function bulkImportClients(
   rows: ClientImportRow[],
   strategy: DuplicateResolution,
@@ -433,7 +973,7 @@ export async function bulkImportClients(
   try {
     const payload = toDbPayload(rows);
     if (payload.length === 0) {
-      return { inserted: 0, updated: 0, skipped: 0 };
+      return { inserted: 0, updated: 0, skipped: 0, denied: 0 };
     }
 
     const phones = [...new Set(payload.map((r) => r.phone))];
@@ -446,10 +986,12 @@ export async function bulkImportClients(
         await upsertChunk(chunk);
         updated += chunk.length;
       }
-      return { inserted: 0, updated, skipped: 0 };
+      return { inserted: 0, updated, skipped: 0, denied: 0 };
     }
 
-    const toInsert = payload.filter((row) => !existingPhones.has(row.phone));
+    const toInsert = payload.filter(
+      (row) => !existingPhones.has(phoneComparisonKey(row.phone)),
+    );
     const skipped = payload.length - toInsert.length;
 
     let inserted = 0;
@@ -459,7 +1001,7 @@ export async function bulkImportClients(
       inserted += chunk.length;
     }
 
-    return { inserted, updated: 0, skipped };
+    return { inserted, updated: 0, skipped, denied: 0 };
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "Error en la carga masiva de clientes.";
@@ -475,8 +1017,8 @@ export async function isClientPhoneRegistered(phone: string): Promise<boolean> {
   try {
     const normalized = normalizePhone(phone);
     if (!normalized) return false;
-    const existing = await fetchExistingPhones([normalized]);
-    return existing.has(normalized);
+    const index = await fetchExistingPhoneIndex([normalized]);
+    return isPhoneRegistered(normalized, index);
   } catch (err) {
     const message =
       err instanceof Error
@@ -616,4 +1158,23 @@ export async function fetchAffiliateOptions(): Promise<string[]> {
 export function formatImportRowLabel(row: ClientImportRow): string {
   const name = [row.first_name, row.last_name].filter(Boolean).join(" ").trim();
   return name || row.email || `Fila ${row.excelRowNumber}`;
+}
+
+export function formatExistingClientLabel(client: ExistingClientSnapshot): string {
+  const name = [client.first_name, client.last_name]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  return name || client.email || client.phone;
+}
+
+export function formatImportOwnerLabel(row: ClientImportRow): string {
+  if (!row.owner_id) return "Sin asignar";
+  return row.owner_id;
+}
+
+export function formatExistingOwnerLabel(client: ExistingClientSnapshot): string {
+  const fromProfile = formatOwnerDisplayName(client.owner);
+  if (fromProfile !== "Sin asignar") return fromProfile;
+  return client.owner_name?.trim() || "Sin asignar";
 }

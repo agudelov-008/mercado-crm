@@ -2,8 +2,9 @@ import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 
-/** Opciones compartidas para queries de citas — sin staleTime infinito. */
+/** Opciones compartidas para queries de citas — staleTime evita refetch en cada focus. */
 export const appointmentsQueryOptions = {
+  staleTime: 60_000,
   refetchOnMount: true,
   refetchOnWindowFocus: true,
 } as const;

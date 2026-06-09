@@ -1,10 +1,19 @@
 import { useApp } from "@/lib/app-context";
-import { shouldMaskContactInUi } from "@/lib/role-rbac";
+import {
+  canViewClientContactInUi,
+  shouldMaskContactInUi,
+} from "@/lib/role-rbac";
 
 /** Indica si el usuario actual debe ver teléfono/correo enmascarados en pantalla. */
 export function useContactUiMasking(): boolean {
   const { profileRole } = useApp();
   return shouldMaskContactInUi(profileRole);
+}
+
+/** Indica si el usuario actual puede ver teléfono y correo del cliente. */
+export function useCanViewClientContact(): boolean {
+  const { profileRole } = useApp();
+  return canViewClientContactInUi(profileRole);
 }
 
 /** Enmascara teléfono para UI (ej. +57 ********33). */

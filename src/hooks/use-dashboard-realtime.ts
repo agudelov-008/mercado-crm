@@ -1,9 +1,11 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { invalidateQueriesAfterClientCall } from "@/lib/client-call-cache";
 import { supabase } from "@/lib/supabase";
 
 /** Opciones compartidas para queries del dashboard. */
 export const dashboardQueryOptions = {
+  staleTime: 60_000,
   refetchOnMount: true,
   refetchOnWindowFocus: true,
 } as const;
@@ -15,13 +17,13 @@ function invalidateDashboardData(queryClient: ReturnType<typeof useQueryClient>)
   void queryClient.invalidateQueries({ queryKey: ["secure-client"] });
 }
 
-/** Sincroniza KPIs del dashboard cuando cambian clientes o activity_logs (p. ej. tras Llamar). */
-export function useDashboardRealtime() {
+/** Sincroniza clientes y actividad cuando cambian en Supabase (p. ej. tras Llamar). */
+export function useClientsRealtime() {
   const queryClient = useQueryClient();
 
   useEffect(() => {
     const channel = supabase
-      .channel("realtime-dashboard-calls")
+      .channel("realtime-clients-contact")
       .on(
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "clients" },
@@ -30,7 +32,7 @@ export function useDashboardRealtime() {
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "activity_logs" },
-        () => invalidateDashboardData(queryClient),
+        () => invalidateQueriesAfterClientCall(queryClient),
       )
       .subscribe();
 
@@ -38,4 +40,9 @@ export function useDashboardRealtime() {
       void supabase.removeChannel(channel);
     };
   }, [queryClient]);
+}
+
+/** @deprecated Usa useClientsRealtime en AppShell; se mantiene por compatibilidad en el dashboard. */
+export function useDashboardRealtime() {
+  useClientsRealtime();
 }
