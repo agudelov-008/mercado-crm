@@ -90,11 +90,8 @@
   },
 
   "pnpm": {
-    "peerDependencyRules": {
-      "ignoreMissing": [
-        "react",
-        "react-dom"
-      ]
-    }
-  }
+  "neverBuiltDependencies": [
+    "workerd"
+  ]
+}
 }
