@@ -143,7 +143,7 @@ mercado-crm/
 
 ### How routing works
 
-1. **File-based routing:** Files in `src/routes/` are scanned by `@tanstack/router-plugin`.
+1. **File-based routing:** Files in `src/routes/` are scanned by `tanstackStart()` (via `@tanstack/react-start/plugin/vite`).
 2. **`routeTree.gen.ts`** merges routes into `routeTree` (generated; do not hand-edit).
 3. **`router.tsx`** creates the app router:
 

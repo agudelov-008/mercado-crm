@@ -1,5 +1,9 @@
 import type { ProfileRole } from "@/lib/app-context";
 import { supabase } from "@/lib/supabase";
+import {
+  deleteUserAccount,
+  updateUserAccountAdmin,
+} from "@/utils/user-admin.functions";
 
 export interface TeamProfile {
   id: string;
@@ -216,6 +220,7 @@ export async function fetchUnassignedClients(): Promise<PortfolioClient[]> {
 export async function updateAgentProfile(
   agentId: string,
   data: AgentUpdateInput,
+  previousEmail?: string,
 ): Promise<void> {
   try {
     const firstName = data.firstName.trim();
@@ -224,6 +229,26 @@ export async function updateAgentProfile(
     const password = data.password.trim();
     if (!firstName) throw new Error("El nombre es obligatorio.");
     if (!email) throw new Error("El correo electrónico es obligatorio.");
+
+    const normalizedPreviousEmail = previousEmail?.trim().toLowerCase();
+    const emailChanged =
+      normalizedPreviousEmail !== undefined &&
+      email.toLowerCase() !== normalizedPreviousEmail;
+    const passwordChanged = password.length >= 8;
+
+    if (password.length > 0 && password.length < 8) {
+      throw new Error("La nueva contraseña debe tener al menos 8 caracteres.");
+    }
+
+    if (emailChanged || passwordChanged) {
+      await updateUserAccountAdmin({
+        data: {
+          userId: agentId,
+          ...(emailChanged ? { newEmail: email } : {}),
+          ...(passwordChanged ? { newPassword: password } : {}),
+        },
+      });
+    }
 
     const { error: profileError } = await supabase
       .from("profiles")
@@ -236,20 +261,6 @@ export async function updateAgentProfile(
       .in("role", [...PROVISIONABLE_TEAM_ROLES]);
 
     if (profileError) throw profileError;
-
-    if (password.length > 0) {
-      const { error: rpcError } = await supabase.rpc("update_agent_with_user", {
-        agent_id: agentId,
-        user_email: email,
-        user_first_name: firstName,
-        user_last_name: lastName || null,
-        user_password: password,
-      });
-
-      if (rpcError && rpcError.code !== "PGRST202") {
-        throw rpcError;
-      }
-    }
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "No se pudo actualizar el asesor.";
@@ -296,6 +307,8 @@ export async function deleteAgentProfile(agentId: string): Promise<void> {
       .in("role", [...PROVISIONABLE_TEAM_ROLES]);
 
     if (deleteError) throw deleteError;
+
+    await deleteUserAccount({ data: { userId: agentId } });
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "No se pudo eliminar el asesor.";

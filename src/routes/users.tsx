@@ -216,7 +216,7 @@ function UsersCrud({ profileRole }: { profileRole: ProfileRole }) {
   const updateMutation = useMutation({
     mutationFn: () => {
       if (!editAgent) throw new Error("No hay asesor seleccionado.");
-      return updateAgentProfile(editAgent.id, editForm);
+      return updateAgentProfile(editAgent.id, editForm, editAgent.email);
     },
     onSuccess: () => {
       toast.success("Asesor actualizado correctamente.");
@@ -522,6 +522,8 @@ function UsersCrud({ profileRole }: { profileRole: ProfileRole }) {
               onEmail={(v) => updateEditField("email", v)}
               onPassword={(v) => updateEditField("password", v)}
               passwordRequired={false}
+              emailLabel="Correo electrónico"
+              passwordLabel="Nueva contraseña"
               passwordHint="Dejar vacío para no cambiar la contraseña."
             />
             <DialogFooter className="gap-2 sm:gap-0">
@@ -606,6 +608,8 @@ function AgentFormFields({
   onEmail,
   onPassword,
   passwordRequired,
+  emailLabel = "Correo de acceso",
+  passwordLabel,
   passwordHint,
 }: {
   firstName: string;
@@ -617,8 +621,12 @@ function AgentFormFields({
   onEmail: (v: string) => void;
   onPassword: (v: string) => void;
   passwordRequired: boolean;
+  emailLabel?: string;
+  passwordLabel?: string;
   passwordHint?: string;
 }) {
+  const resolvedPasswordLabel =
+    passwordLabel ?? (passwordRequired ? "Contraseña temporal" : "Nueva contraseña");
   return (
     <>
       <div className="grid grid-cols-2 gap-3">
@@ -643,7 +651,7 @@ function AgentFormFields({
         </div>
       </div>
       <div className="space-y-1.5">
-        <Label htmlFor="agent-form-email">Correo de acceso</Label>
+        <Label htmlFor="agent-form-email">{emailLabel}</Label>
         <Input
           id="agent-form-email"
           type="email"
@@ -655,9 +663,7 @@ function AgentFormFields({
         />
       </div>
       <div className="space-y-1.5">
-        <Label htmlFor="agent-form-password">
-          {passwordRequired ? "Contraseña temporal" : "Nueva contraseña"}
-        </Label>
+        <Label htmlFor="agent-form-password">{resolvedPasswordLabel}</Label>
         <Input
           id="agent-form-password"
           type="password"
