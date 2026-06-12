@@ -14,7 +14,7 @@ export default defineConfig({
     nitro(),
   ],
   server: {
-    port: 8080,
+    port: 8000,
     hmr: { overlay: false },
     proxy: {
       "/yahoo-api": {
