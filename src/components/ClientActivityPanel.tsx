@@ -350,6 +350,7 @@ export function ClientActivityPanel({
     const text = (log.text || "").toLowerCase();
     const isSystem = text.includes("[sistema]");
     const isStatus = text.includes("[estado]");
+    const isCall = text.includes("llamada") || text.includes("call");
 
     if (filterType === "system") {
       return isSystem;
@@ -357,8 +358,11 @@ export function ClientActivityPanel({
     if (filterType === "status") {
       return isStatus;
     }
+    if (filterType === "call") {
+      return isCall;
+    }
     if (filterType === "comment") {
-      return !isSystem && !isStatus;
+      return !isSystem && !isStatus && !isCall;
     }
     return true;
   });
@@ -517,6 +521,7 @@ export function ClientActivityPanel({
               <SelectItem value="all">Todos</SelectItem>
               <SelectItem value="system">Sistema</SelectItem>
               <SelectItem value="status">Estados</SelectItem>
+              <SelectItem value="call">Llamadas</SelectItem>
               <SelectItem value="comment">Comentarios</SelectItem>
             </SelectContent>
           </Select>
