@@ -518,7 +518,7 @@ export function ClientDetail() {
                     onClick={() => void callClient(phone)}
                     className="h-10 px-4 rounded-md bg-success/15 hover:bg-success/25 text-success border border-success/30 flex items-center gap-2 text-sm font-medium"
                   >
-                    <Phone className="h-4 w-4" /> Llamar
+                    <Phone className="h-4 w-4" /> Call Primary
                   </button>
                 )}
                 {canOpenWhatsApp && (

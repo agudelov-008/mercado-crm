@@ -108,17 +108,13 @@ export async function fetchActivityLogsByPhone(
 export async function updateActivityLog(
   id: string,
   text: string,
-): Promise<ActivityLog> {
+): Promise<void> {
   try {
-    const { data, error } = await supabase
-      .from("activity_logs")
-      .update({ text: text.trim() })
-      .eq("id", id)
-      .select(ACTIVITY_LOG_SELECT)
-      .single();
-
+    const { error } = await supabase.rpc("update_activity_log", {
+      p_id: id,
+      p_text: text.trim(),
+    });
     if (error) throw error;
-    return data as ActivityLog;
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "No se pudo actualizar la nota.";
@@ -128,7 +124,7 @@ export async function updateActivityLog(
 
 export async function deleteActivityLog(id: string): Promise<void> {
   try {
-    const { error } = await supabase.from("activity_logs").delete().eq("id", id);
+    const { error } = await supabase.rpc("delete_activity_log", { p_id: id });
     if (error) throw error;
   } catch (err) {
     const message =

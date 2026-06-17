@@ -53,6 +53,13 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 const activityTypeStyles: Record<string, string> = {
   comment: "bg-info/15 text-info border-info/30",
@@ -336,6 +343,26 @@ export function ClientActivityPanel({
     : isAuthLoading ||
       (isActivityQueryEnabled && isInternalActivitiesPending);
 
+  const [filterType, setFilterType] = useState<string>("all");
+
+  const filteredActivities = activities.filter((log) => {
+    if (!filterType || filterType === "all") return true;
+    const text = (log.text || "").toLowerCase();
+    const isSystem = text.includes("[sistema]");
+    const isStatus = text.includes("[estado]");
+
+    if (filterType === "system") {
+      return isSystem;
+    }
+    if (filterType === "status") {
+      return isStatus;
+    }
+    if (filterType === "comment") {
+      return !isSystem && !isStatus;
+    }
+    return true;
+  });
+
   const noteMutation = useMutation({
     mutationFn: (text: string) => {
       if (!canCreateNotes) throw new Error("No tienes permiso para crear notas.");
@@ -350,7 +377,7 @@ export function ClientActivityPanel({
     onSuccess: () => {
       setNoteText("");
       toast.success("Nota guardada.");
-      void queryClient.invalidateQueries({ queryKey: activityQueryKey });
+      void queryClient.invalidateQueries({ queryKey: ["activity-logs"], exact: false });
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "No se pudo guardar la nota.");
@@ -365,7 +392,7 @@ export function ClientActivityPanel({
     onMutate: ({ id }) => setPendingLogId(id),
     onSuccess: () => {
       toast.success("Actividad actualizada.");
-      void queryClient.invalidateQueries({ queryKey: activityQueryKey });
+      void queryClient.invalidateQueries({ queryKey: ["activity-logs"], exact: false });
     },
     onError: (err) => {
       toast.error(
@@ -383,7 +410,7 @@ export function ClientActivityPanel({
     onMutate: (id) => setPendingLogId(id),
     onSuccess: () => {
       toast.success("Actividad eliminada.");
-      void queryClient.invalidateQueries({ queryKey: activityQueryKey });
+      void queryClient.invalidateQueries({ queryKey: ["activity-logs"], exact: false });
     },
     onError: (err) => {
       toast.error(
@@ -480,6 +507,21 @@ export function ClientActivityPanel({
           </p>
         )}
 
+        <div className="flex items-center justify-between gap-4 shrink-0 pb-2">
+          <span className="text-xs font-medium text-muted-foreground">Filtrar actividades</span>
+          <Select value={filterType} onValueChange={setFilterType}>
+            <SelectTrigger className="h-8 w-[180px] bg-surface/50 border-border text-xs">
+              <SelectValue placeholder="Todos" />
+            </SelectTrigger>
+            <SelectContent className="bg-popover border-border">
+              <SelectItem value="all">Todos</SelectItem>
+              <SelectItem value="system">Sistema</SelectItem>
+              <SelectItem value="status">Estados</SelectItem>
+              <SelectItem value="comment">Comentarios</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
         <ScrollArea className="flex-1 min-h-[280px] pr-3">
           {!useParentActivities && !isAuthLoading && !isActivityQueryEnabled && (
             <p className="text-sm text-muted-foreground py-4 text-center">
@@ -516,17 +558,24 @@ export function ClientActivityPanel({
 
           {!isHistoryPending && !isActivitiesError && activities.length > 0 && (
             <div className="pt-1">
-              {activities.map((log) => (
-                <ActivityTimelineItem
-                  key={log.id}
-                  log={log}
-                  canManage={canManageLogs}
-                  onUpdate={handleUpdateLog}
-                  onDelete={handleDeleteLog}
-                  isUpdating={updateLogMutation.isPending && pendingLogId === log.id}
-                  isDeleting={deleteLogMutation.isPending && pendingLogId === log.id}
-                />
-              ))}
+              {filteredActivities.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
+                  <MessageSquare className="h-8 w-8 mb-3 opacity-40" />
+                  <p className="text-sm">No hay actividades que coincidan con el filtro.</p>
+                </div>
+              ) : (
+                filteredActivities.map((log) => (
+                  <ActivityTimelineItem
+                    key={log.id}
+                    log={log}
+                    canManage={canManageLogs}
+                    onUpdate={handleUpdateLog}
+                    onDelete={handleDeleteLog}
+                    isUpdating={updateLogMutation.isPending && pendingLogId === log.id}
+                    isDeleting={deleteLogMutation.isPending && pendingLogId === log.id}
+                  />
+                ))
+              )}
             </div>
           )}
         </ScrollArea>

@@ -20,6 +20,12 @@ const DATE_ONLY_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const TP_ACCOUNT_MIN = 10_000_000;
 const TP_ACCOUNT_MAX = 99_999_999;
 
+/** Nombre del afiliado en `clients.affiliate` (columna texto, no UUID). */
+const DIAMOND_AFFILIATE_NAME = "Diamond";
+
+/** UUID del asesor Diamond en `clients.owner_id` → `profiles.id`. */
+const DIAMOND_OWNER_ID = "061d974b-b5ac-466d-abbd-36087e3c3d00";
+
 const CLIENT_SELECT =
   "phone, first_name, last_name, email, country, affiliate, lead_status, tp_account, owner_id, total_calls, created_on, last_contacted, updated_at";
 
@@ -256,18 +262,7 @@ interface BulkUploadSummary {
   skipped_duplicates: number;
 }
 
-function resolveAffiliateName(): string {
-  const affiliate = process.env.TRACKBOX_INBOUND_USER?.trim();
-  if (!affiliate) {
-    throw new Error("TRACKBOX_INBOUND_USER no está configurado en el servidor.");
-  }
-  return affiliate;
-}
-
-function toClientPayload(
-  lead: TrackboxLeadBody,
-  affiliate: string,
-): DbClientRow {
+function toClientPayload(lead: TrackboxLeadBody): DbClientRow {
   return sanitizeDbClientRow({
     first_name: lead.first_name,
     last_name: lead.last_name,
@@ -275,10 +270,22 @@ function toClientPayload(
     email: lead.email,
     country: lead.country,
     tp_account: null,
-    affiliate,
+    affiliate: null,
     lead_status: "New",
     owner_id: null,
   });
+}
+
+/** Inyecta afiliado y asesor Diamond justo antes del insert en Supabase. */
+function withDiamondAssignment(
+  row: Omit<DbClientRow, "affiliate" | "owner_id"> &
+    Partial<Pick<DbClientRow, "affiliate" | "owner_id">>,
+): Record<string, unknown> {
+  return {
+    ...row,
+    affiliate: DIAMOND_AFFILIATE_NAME,
+    owner_id: DIAMOND_OWNER_ID,
+  };
 }
 
 function parseTrackboxLeadArray(body: unknown): TrackboxLeadBody[] | null {
@@ -409,16 +416,30 @@ async function insertActivityLogsForClients(
 async function insertClientsBulk(payloads: DbClientRow[]): Promise<void> {
   for (let i = 0; i < payloads.length; i += BULK_CHUNK_SIZE) {
     const chunk = payloads.slice(i, i + BULK_CHUNK_SIZE);
-    const { error } = await supabaseAdmin.from("clients").insert(chunk);
+    const dbPayloads = chunk.map((row) =>
+      withDiamondAssignment({
+        first_name: row.first_name,
+        last_name: row.last_name,
+        phone: row.phone,
+        email: row.email,
+        country: row.country,
+        tp_account: row.tp_account,
+        lead_status: row.lead_status || "New",
+      }),
+    );
+    const { error } = await supabaseAdmin.from("clients").insert(dbPayloads);
     if (error) throw error;
   }
 }
 
 async function processBulkLeads(
   leads: TrackboxLeadBody[],
-  affiliate: string,
 ): Promise<BulkUploadSummary> {
-  const sanitized = leads.map((lead) => toClientPayload(lead, affiliate));
+  const sanitized = leads.map((lead) =>
+    sanitizeDbClientRow({
+      ...toClientPayload(lead),
+    }),
+  );
 
   const phones = sanitized.map((row) => row.phone);
   const emails = sanitized
@@ -470,10 +491,7 @@ async function processBulkLeads(
   };
 }
 
-async function processSingleLead(
-  lead: TrackboxLeadBody,
-  affiliate: string,
-): Promise<Response> {
+async function processSingleLead(lead: TrackboxLeadBody): Promise<Response> {
   const conflict = await findExistingClientConflict(lead.phone, lead.email);
   if (conflict) {
     return jsonResponse(
@@ -485,14 +503,24 @@ async function processSingleLead(
     );
   }
 
-  const payload = sanitizeDbClientRow({
-    ...toClientPayload(lead, affiliate),
+  const data = sanitizeDbClientRow({
+    ...toClientPayload(lead),
     tp_account: await generateUniqueTpAccount(),
   });
 
   const { data: createdClient, error: insertError } = await supabaseAdmin
     .from("clients")
-    .insert(payload)
+    .insert(
+      withDiamondAssignment({
+        first_name: data.first_name,
+        last_name: data.last_name,
+        phone: data.phone,
+        email: data.email,
+        country: data.country,
+        tp_account: data.tp_account,
+        lead_status: data.lead_status || "New",
+      }),
+    )
     .select(CLIENT_SELECT)
     .single();
 
@@ -500,7 +528,7 @@ async function processSingleLead(
 
   const agentId = await resolveSystemAgentId();
   const { error: logError } = await supabaseAdmin.from("activity_logs").insert({
-    client_phone: payload.phone,
+    client_phone: data.phone,
     agent_id: agentId,
     text: TRACKBOX_ACTIVITY_TEXT,
     type: "comment",
@@ -781,8 +809,6 @@ export const Route = createFileRoute("/api/v1/leads")({
         if (authError) return authError;
 
         try {
-          const affiliate = resolveAffiliateName();
-
           let body: unknown;
           try {
             body = await request.json();
@@ -805,7 +831,7 @@ export const Route = createFileRoute("/api/v1/leads")({
               );
             }
 
-            const summary = await processBulkLeads(bulkLeads, affiliate);
+            const summary = await processBulkLeads(bulkLeads);
             return jsonResponse(summary, 200);
           }
 
@@ -820,7 +846,7 @@ export const Route = createFileRoute("/api/v1/leads")({
             );
           }
 
-          return await processSingleLead(parsed, affiliate);
+          return await processSingleLead(parsed);
         } catch (err) {
           console.error("POST /api/v1/leads:", err);
           const message =

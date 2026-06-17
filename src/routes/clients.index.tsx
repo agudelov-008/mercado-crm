@@ -12,13 +12,16 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUp,
+  Calendar,
   Download,
   ExternalLink,
   FileUp,
+  Filter,
   Loader2,
   Pencil,
   Phone,
   Plus,
+  Search,
   Trash2,
   UserCog,
 } from "lucide-react";
@@ -68,6 +71,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { useClientCall } from "@/hooks/use-client-call";
 import { ClientImportModal } from "@/components/ClientImportModal";
 import { ManualClientModal } from "@/components/ManualClientModal";
@@ -876,45 +884,93 @@ function ClientsPage() {
                     />
                   </th>
                 )}
-                {visibleColumns.map((col) => (
-                  <th
-                    key={col.key}
-                    className="text-left px-3 py-3 font-medium whitespace-nowrap"
-                  >
-                    <span className="inline-flex items-center">
-                      {col.label}
-                      <SortButtons
-                        column={col.key}
-                        sort={sort}
-                        onSort={handleSort}
-                      />
-                    </span>
-                  </th>
-                ))}
-                <th className="text-right px-4 py-3 font-medium min-w-[200px]">
+                {visibleColumns.map((col) => {
+                  const filterValue = filters[col.key as keyof SecureClientFilters];
+                  const hasFilter = Boolean(filterValue);
+
+                  let FilterIcon = Filter;
+                  if (col.filterType === "text" || col.filterType === "number") {
+                    FilterIcon = Search;
+                  } else if (col.filterType === "date") {
+                    FilterIcon = Calendar;
+                  }
+
+                  return (
+                    <th
+                      key={col.key}
+                      className="text-left px-3 py-2 font-medium whitespace-nowrap align-middle"
+                    >
+                      <div className="flex items-center gap-1.5 min-h-8">
+                        <span className="inline-flex items-center text-xs uppercase tracking-wider text-muted-foreground font-semibold">
+                          {col.label}
+                          <SortButtons
+                            column={col.key}
+                            sort={sort}
+                            onSort={handleSort}
+                          />
+                        </span>
+
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className={cn(
+                                "h-6 w-6 rounded hover:bg-surface-elevated/80 shrink-0 p-0",
+                                hasFilter
+                                  ? "text-primary bg-primary/10 hover:bg-primary/20"
+                                  : "text-muted-foreground/60"
+                              )}
+                              onClick={(e) => e.stopPropagation()}
+                              aria-label={`Filtrar por ${col.label}`}
+                            >
+                              <FilterIcon className="h-3.5 w-3.5" />
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent
+                            className="w-64 p-3 bg-slate-955 border border-slate-800 shadow-md rounded-md [color-scheme:dark]"
+                            align="start"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <div className="space-y-2">
+                              <div className="text-[11px] font-semibold text-slate-200 uppercase tracking-wider">
+                                Filtrar {col.label}
+                              </div>
+                              <ColumnFilter
+                                col={col}
+                                filters={filters}
+                                onChange={handleFiltersChange}
+                                countryOptions={countryOptions}
+                                affiliateOptions={affiliateOptions}
+                                ownerOptions={ownerFilterOptions}
+                              />
+                              {hasFilter && (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="w-full text-[11px] h-6 text-muted-foreground hover:text-foreground hover:bg-surface-elevated/40"
+                                  onClick={() => {
+                                    handleFiltersChange({
+                                      ...filters,
+                                      [col.key]: "",
+                                    });
+                                  }}
+                                >
+                                  Limpiar filtro
+                                </Button>
+                              )}
+                            </div>
+                          </PopoverContent>
+                        </Popover>
+                      </div>
+                    </th>
+                  );
+                })}
+                <th className="text-right px-4 py-3 font-medium min-w-[200px] align-middle">
                   Actions
                 </th>
-              </tr>
-              <tr className="border-t border-border/60 normal-case tracking-normal">
-                {canBulkDelete && <th className="px-3 py-1.5 w-10" />}
-                {visibleColumns.map((col) => (
-                  <th
-                    key={`filter-${col.key}`}
-                    className="px-3 py-1.5 align-middle max-w-[140px]"
-                  >
-                    <div className="flex flex-row items-center min-h-7">
-                      <ColumnFilter
-                        col={col}
-                        filters={filters}
-                        onChange={handleFiltersChange}
-                        countryOptions={countryOptions}
-                        affiliateOptions={affiliateOptions}
-                        ownerOptions={ownerFilterOptions}
-                      />
-                    </div>
-                  </th>
-                ))}
-                <th className="px-4 py-1.5 min-w-[200px]" />
               </tr>
             </thead>
             <tbody>
@@ -1081,7 +1137,7 @@ function ClientsPage() {
                                 void callClient(row.phone);
                               }}
                               className="h-8 w-8 rounded-md bg-success/15 hover:bg-success/25 text-success border border-success/30 flex items-center justify-center"
-                              aria-label="Llamar"
+                              aria-label="Call Primary"
                             >
                               <Phone className="h-3.5 w-3.5" />
                             </button>
