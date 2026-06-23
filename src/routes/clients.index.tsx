@@ -31,6 +31,7 @@ import { toast } from "sonner";
 import { fetchAffiliateOptions } from "@/lib/client-import";
 import { fetchAgentsForOwnerSelect } from "@/lib/user-management";
 import { SearchableFilterSelect } from "@/components/SearchableFilterSelect";
+import { MultiSelectFilterSelect } from "@/components/MultiSelectFilterSelect";
 import {
   bulkUpdateClientOwner,
   bulkUpdateLeadStatus,
@@ -45,6 +46,7 @@ import {
   formatClientDate,
   formatLastContacted,
   formatOwnerDisplayName,
+  isSecureClientFilterActive,
   LEAD_STATUS_BADGE_STYLES,
   LEAD_STATUS_OPTIONS,
   normalizeLeadStatus,
@@ -291,27 +293,12 @@ function ColumnFilter({
   if (col.filterType === "select") {
     const key = col.key as "lead_status" | "previous_lead_status";
     return (
-      <Select
-        value={filters[key] || "all"}
-        onValueChange={(v) =>
-          onChange({ ...filters, [key]: v === "all" ? "" : v })
-        }
-      >
-        <SelectTrigger
-          className="h-7 min-w-0 text-xs p-1 bg-slate-900 border-slate-800 text-slate-300 w-full rounded"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <SelectValue placeholder="Todos" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">Todos</SelectItem>
-          {LEAD_STATUS_OPTIONS.map((status) => (
-            <SelectItem key={status} value={status}>
-              {status}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <MultiSelectFilterSelect
+        value={filters[key]}
+        onChange={(values) => onChange({ ...filters, [key]: values })}
+        options={LEAD_STATUS_OPTIONS}
+        placeholder="Todos"
+      />
     );
   }
 
@@ -914,7 +901,9 @@ function ClientsPage() {
                 )}
                 {visibleColumns.map((col) => {
                   const filterValue = filters[col.key as keyof SecureClientFilters];
-                  const hasFilter = Boolean(filterValue);
+                  const hasFilter = isSecureClientFilterActive(filterValue);
+                  const clearFilterValue =
+                    col.filterType === "select" ? [] : "";
 
                   let FilterIcon = Filter;
                   if (col.filterType === "text" || col.filterType === "number") {
@@ -982,7 +971,7 @@ function ClientsPage() {
                                   onClick={() => {
                                     handleFiltersChange({
                                       ...filters,
-                                      [col.key]: "",
+                                      [col.key]: clearFilterValue,
                                     });
                                   }}
                                 >

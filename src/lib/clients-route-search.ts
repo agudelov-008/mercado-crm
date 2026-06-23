@@ -27,6 +27,19 @@ export type ClientsIndexSearch = z.infer<typeof clientsIndexSearchSchema>;
 
 export const DEFAULT_CLIENTS_PAGE_SIZE: ClientPageSize = 24;
 
+const selectFilterValuesSchema = z.preprocess(
+  (value) => {
+    if (Array.isArray(value)) {
+      return value.filter((item): item is string => typeof item === "string");
+    }
+    if (typeof value === "string" && value.trim()) {
+      return [value.trim()];
+    }
+    return [];
+  },
+  z.array(z.string()),
+);
+
 const secureClientFiltersSchema = z.object({
   first_name: z.string(),
   last_name: z.string(),
@@ -35,10 +48,10 @@ const secureClientFiltersSchema = z.object({
   tp_account: z.string(),
   phone: z.string(),
   email: z.string(),
-  lead_status: z.string(),
+  lead_status: selectFilterValuesSchema,
   owner_name: z.string(),
   total_calls: z.string(),
-  previous_lead_status: z.string(),
+  previous_lead_status: selectFilterValuesSchema,
   previous_owner_name: z.string(),
   created_on: z.string(),
   last_assignment: z.string(),

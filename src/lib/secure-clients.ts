@@ -226,10 +226,10 @@ export interface SecureClientFilters {
   tp_account: string;
   phone: string;
   email: string;
-  lead_status: string;
+  lead_status: string[];
   owner_name: string;
   total_calls: string;
-  previous_lead_status: string;
+  previous_lead_status: string[];
   previous_owner_name: string;
   created_on: string;
   last_assignment: string;
@@ -245,16 +245,37 @@ export const EMPTY_FILTERS: SecureClientFilters = {
   tp_account: "",
   phone: "",
   email: "",
-  lead_status: "",
+  lead_status: [],
   owner_name: "",
   total_calls: "",
-  previous_lead_status: "",
+  previous_lead_status: [],
   previous_owner_name: "",
   created_on: "",
   last_assignment: "",
   last_contacted: "",
   updated_at: "",
 };
+
+export function isSecureClientFilterActive(
+  value: SecureClientFilters[keyof SecureClientFilters],
+): boolean {
+  if (Array.isArray(value)) return value.length > 0;
+  return value.trim() !== "";
+}
+
+function applySelectFilters<
+  T extends { eq: (column: string, value: string) => T; in: (column: string, values: string[]) => T },
+>(query: T, filters: SecureClientFilters): T {
+  for (const key of SELECT_FILTER_KEYS) {
+    const values = filters[key];
+    if (values.length === 1) {
+      query = query.eq(key, values[0]);
+    } else if (values.length > 1) {
+      query = query.in(key, values);
+    }
+  }
+  return query;
+}
 
 export type ColumnFilterType =
   | "text"
@@ -457,13 +478,7 @@ export async function fetchSecureClientsByOwnerId(
     }
 
     query = applyCountryFilter(query, filters.country);
-
-    for (const key of SELECT_FILTER_KEYS) {
-      const value = filters[key].trim();
-      if (value) {
-        query = query.eq(key, value);
-      }
-    }
+    query = applySelectFilters(query, filters);
 
     const totalCallsRaw = filters.total_calls.trim();
     if (totalCallsRaw !== "") {
@@ -538,13 +553,7 @@ export async function fetchSecureClients(
     }
 
     query = applyCountryFilter(query, filters.country);
-
-    for (const key of SELECT_FILTER_KEYS) {
-      const value = filters[key].trim();
-      if (value) {
-        query = query.eq(key, value);
-      }
-    }
+    query = applySelectFilters(query, filters);
 
     const totalCallsRaw = filters.total_calls.trim();
     if (totalCallsRaw !== "") {

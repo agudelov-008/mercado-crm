@@ -13,6 +13,7 @@ import {
   UserPlus,
 } from "lucide-react";
 import { toast } from "sonner";
+import { MultiSelectFilterSelect } from "@/components/MultiSelectFilterSelect";
 import { fetchAgentsForOwnerSelect, type TeamProfile } from "@/lib/user-management";
 import {
   bulkUpdateClientOwner,
@@ -196,27 +197,12 @@ function ColumnFilter({
   if (col.filterType === "select") {
     const key = col.key as "lead_status" | "previous_lead_status";
     return (
-      <Select
-        value={filters[key] || "all"}
-        onValueChange={(v) =>
-          onChange({ ...filters, [key]: v === "all" ? "" : v })
-        }
-      >
-        <SelectTrigger
-          className="h-7 min-w-0 text-xs p-1 bg-slate-900 border-slate-800 text-slate-300 w-full rounded"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <SelectValue placeholder="Todos" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">Todos</SelectItem>
-          {LEAD_STATUS_OPTIONS.map((status) => (
-            <SelectItem key={status} value={status}>
-              {status}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <MultiSelectFilterSelect
+        value={filters[key]}
+        onChange={(values) => onChange({ ...filters, [key]: values })}
+        options={LEAD_STATUS_OPTIONS}
+        placeholder="Todos"
+      />
     );
   }
 
