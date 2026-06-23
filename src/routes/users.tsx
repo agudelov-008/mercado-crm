@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   Briefcase,
+  Eye,
+  EyeOff,
   Loader2,
   Lock,
   Mail,
@@ -633,6 +635,7 @@ function AgentFormFields({
   passwordLabel?: string;
   passwordHint?: string;
 }) {
+  const [showPassword, setShowPassword] = useState(false);
   const resolvedPasswordLabel =
     passwordLabel ?? (passwordRequired ? "Contraseña temporal" : "Nueva contraseña");
   return (
@@ -672,16 +675,32 @@ function AgentFormFields({
       </div>
       <div className="space-y-1.5">
         <Label htmlFor="agent-form-password">{resolvedPasswordLabel}</Label>
-        <Input
-          id="agent-form-password"
-          type="password"
-          value={password}
-          onChange={(e) => onPassword(e.target.value)}
-          className="bg-surface-elevated border-border"
-          autoComplete="new-password"
-          required={passwordRequired}
-          minLength={passwordRequired ? 8 : undefined}
-        />
+        <div className="relative">
+          <Input
+            id="agent-form-password"
+            type={showPassword ? "text" : "password"}
+            value={password}
+            onChange={(e) => onPassword(e.target.value)}
+            className="bg-surface-elevated border-border pr-10"
+            autoComplete="new-password"
+            required={passwordRequired}
+            minLength={passwordRequired ? 8 : undefined}
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="absolute right-0 top-0 h-9 w-9 text-muted-foreground hover:text-foreground"
+            onClick={() => setShowPassword((visible) => !visible)}
+            aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+          >
+            {showPassword ? (
+              <EyeOff className="h-4 w-4" />
+            ) : (
+              <Eye className="h-4 w-4" />
+            )}
+          </Button>
+        </div>
         {passwordHint && (
           <p className="text-xs text-muted-foreground">{passwordHint}</p>
         )}

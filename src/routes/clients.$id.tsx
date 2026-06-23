@@ -15,9 +15,10 @@ import { toast } from "sonner";
 import {
   clientDetailSearchSchema,
   pickClientsListReturnSearch,
-  readClientsListReturnContext,
+  resolveClientsListReturnContext,
 } from "@/lib/clients-route-search";
 import { ClientsBackMenu } from "@/components/ClientsBackMenu";
+import { ClientPageNavColumn } from "@/components/ClientPageNavColumn";
 import { useAuth } from "@/lib/auth-context";
 import { useApp } from "@/lib/app-context";
 import {
@@ -364,7 +365,7 @@ export function ClientDetail() {
     staleTime: 15_000,
   });
 
-  const listContext = readClientsListReturnContext(search);
+  const listContext = resolveClientsListReturnContext(search);
 
   useEffect(() => {
     if (!canEditProfile || !search.edit || !client) return;
@@ -386,31 +387,44 @@ export function ClientDetail() {
     );
   }
 
+  const navColumn = (
+    <ClientPageNavColumn currentPhone={phone} search={search} />
+  );
+
   if (isLoading) {
     return (
-      <div className="p-8 flex flex-col items-center justify-center text-muted-foreground gap-3">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        Cargando cliente…
+      <div className="flex h-full min-h-0 overflow-hidden">
+        {navColumn}
+        <div className="flex-1 min-w-0 overflow-y-auto p-8 flex flex-col items-center justify-center text-muted-foreground gap-3">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          Cargando cliente…
+        </div>
       </div>
     );
   }
 
   if (isError) {
     return (
-      <div className="p-8 space-y-3">
-        <p className="text-destructive">
-          {error instanceof Error ? error.message : "Error al cargar el cliente."}
-        </p>
-        <ClientsBackMenu listContext={listContext} />
+      <div className="flex h-full min-h-0 overflow-hidden">
+        {navColumn}
+        <div className="flex-1 min-w-0 overflow-y-auto p-8 space-y-3">
+          <p className="text-destructive">
+            {error instanceof Error ? error.message : "Error al cargar el cliente."}
+          </p>
+          <ClientsBackMenu listContext={listContext} />
+        </div>
       </div>
     );
   }
 
   if (!client) {
     return (
-      <div className="p-8 space-y-3">
-        <p>Cliente no encontrado.</p>
-        <ClientsBackMenu listContext={listContext} />
+      <div className="flex h-full min-h-0 overflow-hidden">
+        {navColumn}
+        <div className="flex-1 min-w-0 overflow-y-auto p-8 space-y-3">
+          <p>Cliente no encontrado.</p>
+          <ClientsBackMenu listContext={listContext} />
+        </div>
       </div>
     );
   }
@@ -427,6 +441,9 @@ export function ClientDetail() {
       .join("") || "?";
 
   return (
+    <div className="flex h-full min-h-0 overflow-hidden">
+      {navColumn}
+      <div className="flex-1 min-w-0 overflow-y-auto">
     <div className="p-6 lg:p-8 max-w-[1600px] mx-auto flex flex-col gap-6 min-h-0">
       <ClientsBackMenu listContext={listContext} />
 
@@ -672,6 +689,8 @@ export function ClientDetail() {
           }}
         />
       )}
+    </div>
+      </div>
     </div>
   );
 }

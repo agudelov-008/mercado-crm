@@ -210,6 +210,22 @@ export function clientsListReturnSearchFromIndex(input: {
   };
 }
 
+export function defaultClientsListReturnContext(): ClientsListReturnContext {
+  return {
+    page: 1,
+    pageSize: DEFAULT_CLIENTS_PAGE_SIZE,
+    filters: EMPTY_FILTERS,
+    sort: null,
+    totalPages: 1,
+  };
+}
+
+export function resolveClientsListReturnContext(
+  search: Record<string, unknown>,
+): ClientsListReturnContext {
+  return readClientsListReturnContext(search) ?? defaultClientsListReturnContext();
+}
+
 export function readClientsListReturnContext(
   search: Record<string, unknown>,
 ): ClientsListReturnContext | null {
