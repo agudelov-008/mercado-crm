@@ -17,7 +17,6 @@ import { fetchAgentsForOwnerSelect, type TeamProfile } from "@/lib/user-manageme
 import {
   bulkUpdateClientOwner,
   CLIENT_PAGE_SIZE_OPTIONS,
-  CLIENT_TABLE_COLUMNS,
   clientDetailIdFromPhone,
   EMPTY_FILTERS,
   fetchSecureClientsByOwnerId,
@@ -52,16 +51,14 @@ import {
 } from "@/components/ui/select";
 import { CountryDisplay } from "@/lib/country-flags";
 import { cn } from "@/lib/utils";
+import { useApp } from "@/lib/app-context";
+import { getVisibleClientTableColumns } from "@/lib/role-rbac";
 
 interface AgentPortfolioModalProps {
   agent: TeamProfile | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
-
-const PORTFOLIO_COLUMNS: ClientTableColumnDef[] = CLIENT_TABLE_COLUMNS.filter(
-  (col) => col.key !== "owner_name" && col.key !== "previous_owner_name",
-);
 
 const STATUS_COLUMNS: SecureClientColumn[] = [
   "lead_status",
@@ -259,6 +256,7 @@ export function AgentPortfolioModal({
   onOpenChange,
 }: AgentPortfolioModalProps) {
   const queryClient = useQueryClient();
+  const { profileRole } = useApp();
   const agentId = agent?.id ?? "";
   const [filters, setFilters] = useState<SecureClientFilters>(EMPTY_FILTERS);
   const [sort, setSort] = useState<SecureClientSort | null>(null);
@@ -306,8 +304,15 @@ export function AgentPortfolioModal({
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
   const pageFrom = totalCount === 0 ? 0 : page * pageSize + 1;
   const pageTo = Math.min((page + 1) * pageSize, totalCount);
+  const portfolioColumns = useMemo(
+    () =>
+      getVisibleClientTableColumns(profileRole).filter(
+        (col) => col.key !== "owner_name" && col.key !== "previous_owner_name",
+      ),
+    [profileRole],
+  );
   const isLoading = isPending || isFetching;
-  const tableColSpan = PORTFOLIO_COLUMNS.length + 2;
+  const tableColSpan = portfolioColumns.length + 2;
 
   useEffect(() => {
     setPage((p) => Math.min(p, Math.max(0, totalPages - 1)));
@@ -564,7 +569,7 @@ export function AgentPortfolioModal({
                         aria-label="Seleccionar todos"
                       />
                     </th>
-                    {PORTFOLIO_COLUMNS.map((col) => (
+                    {portfolioColumns.map((col) => (
                       <th
                         key={col.key}
                         className="text-left px-3 py-3 font-medium whitespace-nowrap"
@@ -585,7 +590,7 @@ export function AgentPortfolioModal({
                   </tr>
                   <tr className="border-t border-border/60 normal-case tracking-normal">
                     <th className="px-3 py-1.5 w-10" />
-                    {PORTFOLIO_COLUMNS.map((col) => (
+                    {portfolioColumns.map((col) => (
                       <th
                         key={`filter-${col.key}`}
                         className="px-3 py-1.5 align-middle max-w-[140px]"
@@ -658,7 +663,7 @@ export function AgentPortfolioModal({
                               aria-label="Seleccionar cliente"
                             />
                           </td>
-                          {PORTFOLIO_COLUMNS.map((col) => (
+                          {portfolioColumns.map((col) => (
                             <td
                               key={`${row.phone}-${col.key}`}
                               className="px-3 py-3 whitespace-nowrap max-w-[200px] truncate"

@@ -23,9 +23,11 @@ export function getProfileRoleLabel(role: ProfileRole): string {
   }
 }
 
-/** El Agente no ve teléfono ni correo del cliente en ninguna pantalla. */
+/** Agente y Asistente no ven teléfono ni correo del cliente en ninguna pantalla. */
 export function canViewClientContactInUi(role: ProfileRole | null): boolean {
-  return role !== null && role !== "Agent";
+  return (
+    role !== null && role !== "Agent" && role !== "Assistant"
+  );
 }
 
 /** @deprecated El Agente ya no ve contacto; el enmascaramiento no aplica a ningún rol. */
@@ -74,7 +76,20 @@ export function getCreatableTeamRoles(
   return [];
 }
 
-/** Admin y CRM pueden editar/eliminar este perfil; Asistente solo lectura. */
+/** Correo de miembros del equipo en gestión de usuarios: no visible para CRM. */
+export function canViewTeamMemberEmailInUi(role: ProfileRole | null): boolean {
+  return role !== null && role !== "Manager";
+}
+
+/** Editar datos de cuenta (lápiz): solo Admin. */
+export function canEditTeamMember(
+  actorRole: ProfileRole | null,
+  _targetRole: ProfileRole,
+): boolean {
+  return actorRole === "Admin";
+}
+
+/** Admin y CRM pueden eliminar este perfil; Asistente solo lectura. */
 export function canManageTeamMember(
   actorRole: ProfileRole | null,
   targetRole: ProfileRole,
@@ -114,10 +129,7 @@ const RESTRICTED_COLUMNS_FOR_FIELD_ROLES: SecureClientColumn[] = [
   "previous_owner_name",
 ];
 
-const HIDDEN_CONTACT_COLUMNS_FOR_AGENT: SecureClientColumn[] = [
-  "phone",
-  "email",
-];
+const HIDDEN_CONTACT_COLUMNS: SecureClientColumn[] = ["phone", "email"];
 
 export function getVisibleClientTableColumns(
   role: ProfileRole | null,
@@ -130,9 +142,9 @@ export function getVisibleClientTableColumns(
     );
   }
 
-  if (role === "Agent") {
+  if (role === "Agent" || role === "Assistant") {
     columns = columns.filter(
-      (col) => !HIDDEN_CONTACT_COLUMNS_FOR_AGENT.includes(col.key),
+      (col) => !HIDDEN_CONTACT_COLUMNS.includes(col.key),
     );
   }
 

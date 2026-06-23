@@ -19,7 +19,9 @@ import { useApp } from "@/lib/app-context";
 import {
   canAccessUserManagement,
   canCrudTeamUsers,
+  canEditTeamMember,
   canManageTeamMember,
+  canViewTeamMemberEmailInUi,
   getCreatableTeamRoles,
   getProfileRoleLabel,
 } from "@/lib/role-rbac";
@@ -163,6 +165,8 @@ function UsersPage() {
 function UsersCrud({ profileRole }: { profileRole: ProfileRole }) {
   const { user, isLoading: isAuthLoading } = useAuth();
   const canCrud = canCrudTeamUsers(profileRole);
+  const canViewTeamEmail = canViewTeamMemberEmailInUi(profileRole);
+  const tableColSpan = canViewTeamEmail ? 5 : 4;
   const createRoleOptions = createRoleOptionsForActor(profileRole);
   const queryClient = useQueryClient();
   const isAgentsQueryReady = !isAuthLoading && !!user?.id && profileRole !== null;
@@ -328,14 +332,16 @@ function UsersCrud({ profileRole }: { profileRole: ProfileRole }) {
                 <th className="text-left px-4 py-3 font-medium">Miembro</th>
                 <th className="text-left px-4 py-3 font-medium">Rol</th>
                 <th className="text-right px-4 py-3 font-medium">Clientes</th>
-                <th className="text-left px-4 py-3 font-medium">Correo</th>
+                {canViewTeamEmail && (
+                  <th className="text-left px-4 py-3 font-medium">Correo</th>
+                )}
                 <th className="text-right px-4 py-3 font-medium min-w-[280px]">Acciones</th>
               </tr>
             </thead>
             <tbody>
               {isLoading && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={tableColSpan} className="px-4 py-12 text-center text-muted-foreground">
                     <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
                     Cargando datos desde Supabase…
                   </td>
@@ -343,7 +349,7 @@ function UsersCrud({ profileRole }: { profileRole: ProfileRole }) {
               )}
               {isError && !isLoading && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-destructive">
+                  <td colSpan={tableColSpan} className="px-4 py-8 text-center text-destructive">
                     {error instanceof Error
                       ? error.message
                       : "Error al cargar miembros del equipo."}
@@ -352,7 +358,7 @@ function UsersCrud({ profileRole }: { profileRole: ProfileRole }) {
               )}
               {!isLoading && !isError && agents.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
+                  <td colSpan={tableColSpan} className="px-4 py-8 text-center text-muted-foreground">
                     No hay miembros registrados. Crea el primero con el botón superior.
                   </td>
                 </tr>
@@ -380,12 +386,14 @@ function UsersCrud({ profileRole }: { profileRole: ProfileRole }) {
                     <td className="px-4 py-3 text-right tabular-nums font-medium">
                       {agent.clientCount}
                     </td>
-                    <td className="px-4 py-3">
-                      <span className="text-xs text-muted-foreground flex items-center gap-1">
-                        <Mail className="h-3 w-3 shrink-0" />
-                        {agent.email}
-                      </span>
-                    </td>
+                    {canViewTeamEmail && (
+                      <td className="px-4 py-3">
+                        <span className="text-xs text-muted-foreground flex items-center gap-1">
+                          <Mail className="h-3 w-3 shrink-0" />
+                          {agent.email}
+                        </span>
+                      </td>
+                    )}
                     <td className="px-4 py-3">
                       <div className="flex justify-end flex-wrap gap-1.5">
                         <Button
@@ -399,31 +407,31 @@ function UsersCrud({ profileRole }: { profileRole: ProfileRole }) {
                           <Users className="h-3.5 w-3.5" />
                           Gestionar cartera
                         </Button>
+                        {canEditTeamMember(profileRole, agent.role) && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-8 w-8 p-0"
+                            disabled={isSaving}
+                            onClick={() => openEdit(agent)}
+                            aria-label={`Editar ${profileName(agent)}`}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
                         {canManageTeamMember(profileRole, agent.role) && (
-                          <>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="h-8 w-8 p-0"
-                              disabled={isSaving}
-                              onClick={() => openEdit(agent)}
-                              aria-label={`Editar ${profileName(agent)}`}
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="h-8 w-8 p-0 border-destructive/30 text-destructive hover:bg-destructive/10"
-                              disabled={isSaving}
-                              onClick={() => setDeleteTarget(agent)}
-                              aria-label={`Eliminar ${profileName(agent)}`}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          </>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-8 w-8 p-0 border-destructive/30 text-destructive hover:bg-destructive/10"
+                            disabled={isSaving}
+                            onClick={() => setDeleteTarget(agent)}
+                            aria-label={`Eliminar ${profileName(agent)}`}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
                         )}
                       </div>
                     </td>

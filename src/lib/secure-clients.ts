@@ -29,6 +29,38 @@ export type LeadStatus = (typeof LEAD_STATUS_OPTIONS)[number];
 
 const DEFAULT_LEAD_STATUS: LeadStatus = "New";
 
+/** Asesor "Reasignacion": al asignar, el lead_status pasa a New. */
+export const REASIGNACION_OWNER_ID = "c5a49130-d22d-4b4e-9df0-00703bca8a2a";
+
+/** Asesor "FTD NAN": al asignar, el lead_status pasa a Nan. */
+export const FTD_NAN_OWNER_ID = "cf346afa-525b-4b67-8635-d22ecf141590";
+
+/**
+ * Si el asesor asignado es uno de los casos especiales, devuelve el lead_status
+ * que debe aplicarse automáticamente; en caso contrario, undefined.
+ */
+export function resolveLeadStatusForOwnerAssignment(
+  ownerId: string | null,
+): LeadStatus | undefined {
+  if (ownerId === REASIGNACION_OWNER_ID) return "New";
+  if (ownerId === FTD_NAN_OWNER_ID) return "Nan";
+  return undefined;
+}
+
+function buildOwnerAssignmentUpdate(ownerId: string | null): {
+  owner_id: string | null;
+  lead_status?: LeadStatus;
+} {
+  const update: { owner_id: string | null; lead_status?: LeadStatus } = {
+    owner_id: ownerId,
+  };
+  const leadStatus = resolveLeadStatusForOwnerAssignment(ownerId);
+  if (leadStatus !== undefined) {
+    update.lead_status = leadStatus;
+  }
+  return update;
+}
+
 /** Estilos de badge por estado (tabla y detalle). */
 export const LEAD_STATUS_BADGE_STYLES: Record<LeadStatus, string> = {
   New: "bg-info/15 text-info border-info/30",
@@ -570,7 +602,7 @@ export async function updateClientOwner(
   try {
     const { error } = await supabase
       .from("clients")
-      .update({ owner_id: ownerId })
+      .update(buildOwnerAssignmentUpdate(ownerId))
       .eq("phone", phone);
 
     if (error) throw error;
@@ -592,7 +624,7 @@ export async function bulkUpdateClientOwner(
   try {
     const { error } = await supabase
       .from("clients")
-      .update({ owner_id: ownerId })
+      .update(buildOwnerAssignmentUpdate(ownerId))
       .in("phone", phones);
 
     if (error) throw error;

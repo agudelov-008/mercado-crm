@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
   clientsIndexSearchSchema,
+  clientsListReturnSearchFromIndex,
+  decodeClientsListReturnContext,
   clientsPageIndexFromSearch,
   clientsPageSizeFromSearch,
   mergeClientsIndexSearch,
@@ -46,6 +48,7 @@ import {
   LEAD_STATUS_BADGE_STYLES,
   LEAD_STATUS_OPTIONS,
   normalizeLeadStatus,
+  resolveLeadStatusForOwnerAssignment,
   type LeadStatus,
   type SecureClient,
   type SecureClientColumn,
@@ -328,7 +331,7 @@ function ColumnFilter({
 function ClientsPage() {
   const navigate = useNavigate();
   const searchParams = Route.useSearch();
-  const { search: globalSearch = "" } = searchParams;
+  const { search: globalSearch = "", ctx: listContextParam } = searchParams;
   const page = clientsPageIndexFromSearch(searchParams);
   const pageSize = clientsPageSizeFromSearch(searchParams);
   const queryClient = useQueryClient();
@@ -364,6 +367,14 @@ function ClientsPage() {
   const [importOpen, setImportOpen] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
 
+  useEffect(() => {
+    if (!listContextParam) return;
+    const context = decodeClientsListReturnContext(listContextParam);
+    if (!context) return;
+    setFilters(context.filters);
+    setSort(context.sort);
+  }, [listContextParam]);
+
   const updateClientsSearch = (
     patch: Partial<typeof searchParams>,
     replace = true,
@@ -373,6 +384,11 @@ function ClientsPage() {
       search: (prev) => mergeClientsIndexSearch(prev, patch),
       replace,
     });
+  };
+
+  const clearListContextInUrl = () => {
+    if (!listContextParam) return;
+    updateClientsSearch({ ctx: undefined });
   };
 
   const goToPage = (pageIndex: number) => {
@@ -495,9 +511,13 @@ function ClientsPage() {
         old
           ? {
               ...old,
-              rows: old.rows.map((row) =>
-                phones.includes(row.phone) ? { ...row, owner_id: ownerId } : row,
-              ),
+              rows: old.rows.map((row) => {
+                if (!phones.includes(row.phone)) return row;
+                const leadStatus = resolveLeadStatusForOwnerAssignment(ownerId);
+                return leadStatus
+                  ? { ...row, owner_id: ownerId, lead_status: leadStatus }
+                  : { ...row, owner_id: ownerId };
+              }),
             }
           : old,
       );
@@ -588,11 +608,13 @@ function ClientsPage() {
 
   const handleSort = (column: SecureClientColumn, direction: SortDirection) => {
     setSort({ column, direction });
+    clearListContextInUrl();
     resetPageInUrl();
   };
 
   const handleFiltersChange = (next: SecureClientFilters) => {
     setFilters(next);
+    clearListContextInUrl();
     resetPageInUrl();
   };
 
@@ -633,10 +655,16 @@ function ClientsPage() {
           search: undefined,
           q: undefined,
           edit: options?.edit ? ("1" as const) : undefined,
+          ...clientsListReturnSearchFromIndex({
+            search: searchParams,
+            filters,
+            sort,
+            totalPages,
+          }),
         }),
       });
     },
-    [navigate],
+    [navigate, searchParams, filters, sort, totalPages],
   );
 
   const handleBulkSubmit = () => {

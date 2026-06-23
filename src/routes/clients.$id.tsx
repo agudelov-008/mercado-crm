@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
-  ArrowLeft,
   Building2,
   Calendar,
   Globe,
@@ -12,8 +11,13 @@ import {
   Phone,
   User,
 } from "lucide-react";
-import { z } from "zod";
 import { toast } from "sonner";
+import {
+  clientDetailSearchSchema,
+  pickClientsListReturnSearch,
+  readClientsListReturnContext,
+} from "@/lib/clients-route-search";
+import { ClientsBackMenu } from "@/components/ClientsBackMenu";
 import { useAuth } from "@/lib/auth-context";
 import { useApp } from "@/lib/app-context";
 import {
@@ -63,13 +67,7 @@ import type { ProfileAgentOption } from "@/lib/user-management";
 
 export const Route = createFileRoute("/clients/$id")({
   component: ClientDetail,
-  validateSearch: z
-    .object({
-      edit: z.enum(["1", "true"]).optional(),
-      search: z.string().optional(),
-      q: z.string().optional(),
-    })
-    .strip(),
+  validateSearch: clientDetailSearchSchema,
 });
 
 const NONE_OWNER = "__none__";
@@ -366,16 +364,18 @@ export function ClientDetail() {
     staleTime: 15_000,
   });
 
+  const listContext = readClientsListReturnContext(search);
+
   useEffect(() => {
     if (!canEditProfile || !search.edit || !client) return;
     setEditOpen(true);
     navigate({
       to: "/clients/$id",
       params: { id },
-      search: () => ({}),
+      search: () => pickClientsListReturnSearch(search),
       replace: true,
     });
-  }, [canEditProfile, search.edit, client, id, navigate]);
+  }, [canEditProfile, search.edit, client, id, navigate, search]);
 
   if (!isProfileReady) {
     return (
@@ -401,9 +401,7 @@ export function ClientDetail() {
         <p className="text-destructive">
           {error instanceof Error ? error.message : "Error al cargar el cliente."}
         </p>
-        <Link to="/clients" className="text-primary hover:underline text-sm">
-          Volver a clientes
-        </Link>
+        <ClientsBackMenu listContext={listContext} />
       </div>
     );
   }
@@ -412,9 +410,7 @@ export function ClientDetail() {
     return (
       <div className="p-8 space-y-3">
         <p>Cliente no encontrado.</p>
-        <Link to="/clients" className="text-primary hover:underline text-sm">
-          Volver a clientes
-        </Link>
+        <ClientsBackMenu listContext={listContext} />
       </div>
     );
   }
@@ -432,13 +428,7 @@ export function ClientDetail() {
 
   return (
     <div className="p-6 lg:p-8 max-w-[1600px] mx-auto flex flex-col gap-6 min-h-0">
-      <button
-        type="button"
-        onClick={() => navigate({ to: "/clients" })}
-        className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1.5 w-fit"
-      >
-        <ArrowLeft className="h-3.5 w-3.5" /> Volver a clientes
-      </button>
+      <ClientsBackMenu listContext={listContext} />
 
       <div className="flex flex-col lg:flex-row gap-6 flex-1 min-h-0">
         <div className="w-full lg:w-[44%] xl:w-[40%] flex flex-col gap-6 shrink-0">
@@ -497,8 +487,9 @@ export function ClientDetail() {
                 )}
                 {isAssistant && (
                   <p className="text-xs text-muted-foreground mt-2">
-                    Puedes ver contacto completo, llamar, cambiar estado y registrar
-                    notas. La exportación a Excel no incluye teléfono ni correo.
+                    Sin acceso a teléfono ni correo. Puedes llamar, enviar WhatsApp,
+                    cambiar estado y registrar notas. La exportación a Excel no incluye
+                    teléfono ni correo.
                   </p>
                 )}
               </div>
@@ -675,7 +666,7 @@ export function ClientDetail() {
             navigate({
               to: "/clients/$id",
               params: { id: clientDetailIdFromPhone(newPhone) },
-              search: () => ({}),
+              search: () => pickClientsListReturnSearch(search),
               replace: true,
             });
           }}

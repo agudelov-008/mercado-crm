@@ -4,6 +4,7 @@ import {
   formatOwnerDisplayName,
   normalizeLeadStatus,
   normalizeOwnerProfile,
+  resolveLeadStatusForOwnerAssignment,
   type LeadStatus,
   type SecureClientOwnerProfile,
 } from "@/lib/secure-clients";
@@ -145,6 +146,8 @@ function sanitizeOwnerId(value: string | null | undefined): string | null {
 /** Normaliza tipos antes de insert/upsert para evitar rechazos 400 de PostgreSQL. */
 export function sanitizeDbClientRow(row: DbClientRow): DbClientRow {
   const emailRaw = row.email ? normalizeEmail(row.email) : "";
+  const owner_id = sanitizeOwnerId(row.owner_id);
+  const autoLeadStatus = resolveLeadStatusForOwnerAssignment(owner_id);
 
   return {
     phone: normalizePhone(row.phone),
@@ -154,8 +157,8 @@ export function sanitizeDbClientRow(row: DbClientRow): DbClientRow {
     affiliate: emptyToNull(row.affiliate),
     tp_account: emptyToNull(row.tp_account),
     email: emailRaw === "" ? null : emailRaw,
-    lead_status: normalizeLeadStatus(row.lead_status),
-    owner_id: sanitizeOwnerId(row.owner_id),
+    lead_status: autoLeadStatus ?? normalizeLeadStatus(row.lead_status),
+    owner_id,
   };
 }
 
