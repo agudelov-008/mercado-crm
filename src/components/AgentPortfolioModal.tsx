@@ -13,8 +13,10 @@ import {
   UserPlus,
 } from "lucide-react";
 import { toast } from "sonner";
-import { MultiSelectFilterSelect } from "@/components/MultiSelectFilterSelect";
+import { ClientTableColumnFilter } from "@/components/ClientTableColumnFilter";
+import { fetchAffiliateOptions } from "@/lib/client-import";
 import { fetchAgentsForOwnerSelect, type TeamProfile } from "@/lib/user-management";
+import { getSupportedCountryFilterOptions } from "@/lib/country-flags";
 import {
   bulkUpdateClientOwner,
   CLIENT_PAGE_SIZE_OPTIONS,
@@ -24,9 +26,7 @@ import {
   formatClientDate,
   formatLastContacted,
   LEAD_STATUS_BADGE_STYLES,
-  LEAD_STATUS_OPTIONS,
   type ClientPageSize,
-  type ClientTableColumnDef,
   type LeadStatus,
   type SecureClientColumn,
   type SecureClientFilters,
@@ -42,7 +42,6 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -146,83 +145,6 @@ function SortButtons({
   );
 }
 
-function ColumnFilter({
-  col,
-  filters,
-  onChange,
-}: {
-  col: ClientTableColumnDef;
-  filters: SecureClientFilters;
-  onChange: (next: SecureClientFilters) => void;
-}) {
-  if (col.filterType === "text") {
-    const key = col.key as Extract<
-      SecureClientColumn,
-      | "first_name"
-      | "last_name"
-      | "country"
-      | "affiliate"
-      | "tp_account"
-      | "phone"
-      | "email"
-    >;
-    return (
-      <Input
-        value={filters[key]}
-        onChange={(e) => onChange({ ...filters, [key]: e.target.value })}
-        placeholder="Filtrar…"
-        className="h-7 min-w-0 text-xs p-1 bg-slate-900 border-slate-800 text-slate-300 w-full rounded"
-        onClick={(e) => e.stopPropagation()}
-      />
-    );
-  }
-
-  if (col.filterType === "number") {
-    const key = col.key as "total_calls";
-    return (
-      <Input
-        type="number"
-        min={0}
-        inputMode="numeric"
-        value={filters[key]}
-        onChange={(e) => onChange({ ...filters, [key]: e.target.value })}
-        placeholder="0"
-        className="h-7 min-w-0 text-xs p-1 bg-slate-900 border-slate-800 text-slate-300 w-full rounded tabular-nums"
-        onClick={(e) => e.stopPropagation()}
-        aria-label={`Filtrar ${col.label}`}
-      />
-    );
-  }
-
-  if (col.filterType === "select") {
-    const key = col.key as "lead_status" | "previous_lead_status";
-    return (
-      <MultiSelectFilterSelect
-        value={filters[key]}
-        onChange={(values) => onChange({ ...filters, [key]: values })}
-        options={LEAD_STATUS_OPTIONS}
-        placeholder="Todos"
-      />
-    );
-  }
-
-  const dateKey = col.key as
-    | "created_on"
-    | "last_assignment"
-    | "last_contacted"
-    | "updated_at";
-  return (
-    <Input
-      type="date"
-      value={filters[dateKey]}
-      onChange={(e) => onChange({ ...filters, [dateKey]: e.target.value })}
-      className="h-7 min-w-0 text-xs p-1 bg-slate-900 border-slate-800 text-slate-300 w-full rounded [color-scheme:dark]"
-      onClick={(e) => e.stopPropagation()}
-      aria-label={`Filtrar ${col.label} por día`}
-    />
-  );
-}
-
 function invalidatePortfolioQueries(
   queryClient: ReturnType<typeof useQueryClient>,
   agentId: string,
@@ -297,6 +219,7 @@ export function AgentPortfolioModal({
       ),
     [profileRole],
   );
+  const countryOptions = useMemo(() => getSupportedCountryFilterOptions(), []);
   const isLoading = isPending || isFetching;
   const tableColSpan = portfolioColumns.length + 2;
 
@@ -311,6 +234,18 @@ export function AgentPortfolioModal({
     staleTime: 60_000,
     select: (rows) => rows.filter((a) => a.id !== agentId),
   });
+
+  const { data: affiliateOptions = [] } = useQuery({
+    queryKey: ["affiliate-filter-options"],
+    queryFn: fetchAffiliateOptions,
+    enabled: open,
+    staleTime: 300_000,
+  });
+
+  const ownerFilterOptions = useMemo(
+    () => ["Sin asignar", ...agentOptions.map((agent) => agent.label)],
+    [agentOptions],
+  );
 
   const bulkUnassignMutation = useMutation({
     mutationFn: (phones: string[]) => bulkUpdateClientOwner(phones, null),
@@ -581,10 +516,13 @@ export function AgentPortfolioModal({
                         key={`filter-${col.key}`}
                         className="px-3 py-1.5 align-middle max-w-[140px]"
                       >
-                        <ColumnFilter
+                        <ClientTableColumnFilter
                           col={col}
                           filters={filters}
                           onChange={setFilters}
+                          countryOptions={countryOptions}
+                          affiliateOptions={affiliateOptions}
+                          ownerOptions={ownerFilterOptions}
                         />
                       </th>
                     ))}

@@ -200,15 +200,17 @@ export interface SecureClientSort {
 export type TextFilterKey =
   | "first_name"
   | "last_name"
-  | "country"
-  | "affiliate"
   | "tp_account"
   | "phone"
-  | "email"
+  | "email";
+
+export type DropdownFilterKey =
+  | "lead_status"
+  | "previous_lead_status"
+  | "country"
+  | "affiliate"
   | "owner_name"
   | "previous_owner_name";
-
-export type SelectFilterKey = "lead_status" | "previous_lead_status";
 
 export type NumberFilterKey = "total_calls";
 
@@ -221,16 +223,16 @@ export type DateFilterKey =
 export interface SecureClientFilters {
   first_name: string;
   last_name: string;
-  country: string;
-  affiliate: string;
+  country: string[];
+  affiliate: string[];
   tp_account: string;
   phone: string;
   email: string;
   lead_status: string[];
-  owner_name: string;
+  owner_name: string[];
   total_calls: string;
   previous_lead_status: string[];
-  previous_owner_name: string;
+  previous_owner_name: string[];
   created_on: string;
   last_assignment: string;
   last_contacted: string;
@@ -240,16 +242,16 @@ export interface SecureClientFilters {
 export const EMPTY_FILTERS: SecureClientFilters = {
   first_name: "",
   last_name: "",
-  country: "",
-  affiliate: "",
+  country: [],
+  affiliate: [],
   tp_account: "",
   phone: "",
   email: "",
   lead_status: [],
-  owner_name: "",
+  owner_name: [],
   total_calls: "",
   previous_lead_status: [],
-  previous_owner_name: "",
+  previous_owner_name: [],
   created_on: "",
   last_assignment: "",
   last_contacted: "",
@@ -263,10 +265,25 @@ export function isSecureClientFilterActive(
   return value.trim() !== "";
 }
 
-function applySelectFilters<
-  T extends { eq: (column: string, value: string) => T; in: (column: string, values: string[]) => T },
+const UNASSIGNED_OWNER_LABEL = "Sin asignar";
+
+const EXACT_DROPDOWN_FILTER_KEYS = [
+  "lead_status",
+  "previous_lead_status",
+  "affiliate",
+] as const satisfies readonly DropdownFilterKey[];
+
+function quotePostgrestFilterValue(value: string): string {
+  return /[,().\s]/.test(value) ? `"${value.replace(/"/g, '\\"')}"` : value;
+}
+
+function applyExactDropdownFilters<
+  T extends {
+    eq: (column: string, value: string) => T;
+    in: (column: string, values: string[]) => T;
+  },
 >(query: T, filters: SecureClientFilters): T {
-  for (const key of SELECT_FILTER_KEYS) {
+  for (const key of EXACT_DROPDOWN_FILTER_KEYS) {
     const values = filters[key];
     if (values.length === 1) {
       query = query.eq(key, values[0]);
@@ -274,6 +291,88 @@ function applySelectFilters<
       query = query.in(key, values);
     }
   }
+  return query;
+}
+
+function applyCountryFilters<T extends { or: (filters: string) => T }>(
+  query: T,
+  values: string[],
+): T {
+  if (values.length === 0) return query;
+
+  const orClauses = new Set<string>();
+  for (const label of values) {
+    const keys = getCountryFilterKeys(label);
+    if (keys?.length) {
+      for (const key of keys) {
+        orClauses.add(`country.ilike.%${key}%`);
+      }
+      continue;
+    }
+    orClauses.add(`country.ilike.%${label}%`);
+  }
+
+  return query.or([...orClauses].join(","));
+}
+
+function applyOwnerNameDropdownFilter<
+  T extends {
+    or: (filters: string) => T;
+    is: (column: string, operator: "is", value: null) => T;
+    eq: (column: string, value: string) => T;
+    in: (column: string, values: string[]) => T;
+  },
+>(
+  query: T,
+  values: string[],
+  nameColumn: "owner_name" | "previous_owner_name",
+  idColumn: "owner_id" | "previous_owner_id",
+): T {
+  if (values.length === 0) return query;
+
+  const names = values.filter((value) => value !== UNASSIGNED_OWNER_LABEL);
+  const hasUnassigned = values.includes(UNASSIGNED_OWNER_LABEL);
+
+  if (hasUnassigned && names.length === 0) {
+    return query.is(idColumn, null);
+  }
+
+  if (hasUnassigned && names.length > 0) {
+    const nameClause =
+      names.length === 1
+        ? `${nameColumn}.eq.${quotePostgrestFilterValue(names[0])}`
+        : `${nameColumn}.in.(${names.map(quotePostgrestFilterValue).join(",")})`;
+    return query.or(`${idColumn}.is.null,${nameClause}`);
+  }
+
+  if (names.length === 1) {
+    return query.eq(nameColumn, names[0]);
+  }
+  return query.in(nameColumn, names);
+}
+
+function applyDropdownFilters<
+  T extends {
+    or: (filters: string) => T;
+    eq: (column: string, value: string) => T;
+    in: (column: string, values: string[]) => T;
+    is: (column: string, operator: "is", value: null) => T;
+  },
+>(query: T, filters: SecureClientFilters): T {
+  query = applyExactDropdownFilters(query, filters);
+  query = applyCountryFilters(query, filters.country);
+  query = applyOwnerNameDropdownFilter(
+    query,
+    filters.owner_name,
+    "owner_name",
+    "owner_id",
+  );
+  query = applyOwnerNameDropdownFilter(
+    query,
+    filters.previous_owner_name,
+    "previous_owner_name",
+    "previous_owner_id",
+  );
   return query;
 }
 
@@ -319,6 +418,20 @@ export const CLIENT_TABLE_COLUMNS: ClientTableColumnDef[] = [
   { key: "updated_at", label: "Updated At", filterType: "date" },
 ];
 
+export function isDropdownFilterType(filterType: ColumnFilterType): boolean {
+  return (
+    filterType === "select" ||
+    filterType === "country" ||
+    filterType === "searchable-select"
+  );
+}
+
+export function emptyFilterValueForColumn(
+  col: ClientTableColumnDef,
+): SecureClientFilters[keyof SecureClientFilters] {
+  return isDropdownFilterType(col.filterType) ? [] : "";
+}
+
 const SELECT_COLUMNS = [
   ...new Set([
     ...CLIENT_TABLE_COLUMNS.map((c) => c.key),
@@ -332,17 +445,9 @@ const SELECT_WITH_PROFILES = `${SELECT_COLUMNS}, owner:profiles!owner_id(first_n
 const TEXT_FILTER_KEYS: TextFilterKey[] = [
   "first_name",
   "last_name",
-  "affiliate",
   "tp_account",
   "phone",
   "email",
-  "owner_name",
-  "previous_owner_name",
-];
-
-const SELECT_FILTER_KEYS: SelectFilterKey[] = [
-  "lead_status",
-  "previous_lead_status",
 ];
 
 const GLOBAL_SEARCH_COLUMNS = [
@@ -352,24 +457,6 @@ const GLOBAL_SEARCH_COLUMNS = [
   "email",
   "tp_account",
 ] as const;
-
-function applyCountryFilter<
-  T extends {
-    or: (filters: string) => T;
-    ilike: (column: string, pattern: string) => T;
-  },
->(query: T, value: string): T {
-  const trimmed = value.trim();
-  if (!trimmed) return query;
-
-  const keys = getCountryFilterKeys(trimmed);
-  if (keys?.length) {
-    const orFilter = keys.map((key) => `country.ilike.%${key}%`).join(",");
-    return query.or(orFilter);
-  }
-
-  return query.ilike("country", `%${trimmed}%`);
-}
 
 function applyGlobalSearch<T extends { or: (filters: string) => T }>(
   query: T,
@@ -477,8 +564,7 @@ export async function fetchSecureClientsByOwnerId(
       }
     }
 
-    query = applyCountryFilter(query, filters.country);
-    query = applySelectFilters(query, filters);
+    query = applyDropdownFilters(query, filters);
 
     const totalCallsRaw = filters.total_calls.trim();
     if (totalCallsRaw !== "") {
@@ -552,8 +638,7 @@ export async function fetchSecureClients(
       }
     }
 
-    query = applyCountryFilter(query, filters.country);
-    query = applySelectFilters(query, filters);
+    query = applyDropdownFilters(query, filters);
 
     const totalCallsRaw = filters.total_calls.trim();
     if (totalCallsRaw !== "") {

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useState } from "react";
 import { Check, ChevronsUpDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,8 @@ type MultiSelectFilterSelectProps = {
   options: readonly string[];
   placeholder?: string;
   className?: string;
+  renderOption?: (option: string) => ReactNode;
+  formatSelectionLabel?: (value: string[]) => string | undefined;
 };
 
 function formatSelectionLabel(value: string[], placeholder: string): string {
@@ -37,6 +40,8 @@ export function MultiSelectFilterSelect({
   options,
   placeholder = "Todos",
   className,
+  renderOption,
+  formatSelectionLabel: formatSelectionLabelOverride,
 }: MultiSelectFilterSelectProps) {
   const [open, setOpen] = useState(false);
 
@@ -64,7 +69,8 @@ export function MultiSelectFilterSelect({
           onClick={(e) => e.stopPropagation()}
         >
           <span className="truncate">
-            {formatSelectionLabel(value, placeholder)}
+            {formatSelectionLabelOverride?.(value) ??
+              formatSelectionLabel(value, placeholder)}
           </span>
           <ChevronsUpDown className="ml-1 h-3 w-3 shrink-0 opacity-50" />
         </Button>
@@ -107,7 +113,9 @@ export function MultiSelectFilterSelect({
                         isSelected ? "opacity-100" : "opacity-0",
                       )}
                     />
-                    <span className="truncate">{option}</span>
+                    <span className="truncate">
+                      {renderOption ? renderOption(option) : option}
+                    </span>
                   </CommandItem>
                 );
               })}

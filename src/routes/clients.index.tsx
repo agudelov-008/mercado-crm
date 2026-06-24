@@ -30,8 +30,7 @@ import {
 import { toast } from "sonner";
 import { fetchAffiliateOptions } from "@/lib/client-import";
 import { fetchAgentsForOwnerSelect } from "@/lib/user-management";
-import { SearchableFilterSelect } from "@/components/SearchableFilterSelect";
-import { MultiSelectFilterSelect } from "@/components/MultiSelectFilterSelect";
+import { ClientTableColumnFilter } from "@/components/ClientTableColumnFilter";
 import {
   bulkUpdateClientOwner,
   bulkUpdateLeadStatus,
@@ -43,6 +42,7 @@ import {
   EMPTY_FILTERS,
   fetchSecureClients,
   fetchSecureClientsByOwnerId,
+  emptyFilterValueForColumn,
   formatClientDate,
   formatLastContacted,
   formatOwnerDisplayName,
@@ -195,123 +195,6 @@ function SortButtons({
         <ArrowDown className="h-3 w-3" />
       </button>
     </span>
-  );
-}
-
-function ColumnFilter({
-  col,
-  filters,
-  onChange,
-  countryOptions,
-  affiliateOptions,
-  ownerOptions,
-}: {
-  col: ClientTableColumnDef;
-  filters: SecureClientFilters;
-  onChange: (next: SecureClientFilters) => void;
-  countryOptions: string[];
-  affiliateOptions: string[];
-  ownerOptions: string[];
-}) {
-  if (col.filterType === "searchable-select") {
-    const key = col.key as "affiliate" | "owner_name" | "previous_owner_name";
-    const options = key === "affiliate" ? affiliateOptions : ownerOptions;
-
-    return (
-      <SearchableFilterSelect
-        value={filters[key]}
-        onChange={(v) => onChange({ ...filters, [key]: v })}
-        options={options}
-        placeholder="Todos"
-      />
-    );
-  }
-
-  if (col.filterType === "country") {
-    return (
-      <Select
-        value={filters.country || "all"}
-        onValueChange={(v) =>
-          onChange({ ...filters, country: v === "all" ? "" : v })
-        }
-      >
-        <SelectTrigger
-          className="h-7 min-w-0 text-xs p-1 bg-slate-900 border-slate-800 text-slate-300 w-full rounded"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <SelectValue placeholder="Todos" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">Todos</SelectItem>
-          {countryOptions.map((country) => (
-            <SelectItem key={country} value={country}>
-              <CountryDisplay country={country} />
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    );
-  }
-
-  if (col.filterType === "text") {
-    const key = col.key as Extract<
-      SecureClientColumn,
-      | "first_name"
-      | "last_name"
-      | "tp_account"
-      | "phone"
-      | "email"
-    >;
-    return (
-      <Input
-        value={filters[key]}
-        onChange={(e) => onChange({ ...filters, [key]: e.target.value })}
-        placeholder="Filtrar…"
-        className="h-7 min-w-0 text-xs p-1 bg-slate-900 border-slate-800 text-slate-300 w-full rounded"
-        onClick={(e) => e.stopPropagation()}
-      />
-    );
-  }
-
-  if (col.filterType === "number") {
-    const key = col.key as "total_calls";
-    return (
-      <Input
-        type="number"
-        min={0}
-        inputMode="numeric"
-        value={filters[key]}
-        onChange={(e) => onChange({ ...filters, [key]: e.target.value })}
-        placeholder="0"
-        className="h-7 min-w-0 text-xs p-1 bg-slate-900 border-slate-800 text-slate-300 w-full rounded tabular-nums"
-        onClick={(e) => e.stopPropagation()}
-        aria-label={`Filtrar ${col.label}`}
-      />
-    );
-  }
-
-  if (col.filterType === "select") {
-    const key = col.key as "lead_status" | "previous_lead_status";
-    return (
-      <MultiSelectFilterSelect
-        value={filters[key]}
-        onChange={(values) => onChange({ ...filters, [key]: values })}
-        options={LEAD_STATUS_OPTIONS}
-        placeholder="Todos"
-      />
-    );
-  }
-
-  const dateKey = col.key as "created_on" | "last_assignment" | "last_contacted" | "updated_at";
-  return (
-    <Input
-      type="date"
-      value={filters[dateKey]}
-      onChange={(e) => onChange({ ...filters, [dateKey]: e.target.value })}
-      className="h-7 min-w-0 text-xs p-1 bg-slate-900 border-slate-800 text-slate-300 w-full rounded [color-scheme:dark]"
-      onClick={(e) => e.stopPropagation()}
-      aria-label={`Filtrar ${col.label} por día`}
-    />
   );
 }
 
@@ -902,8 +785,7 @@ function ClientsPage() {
                 {visibleColumns.map((col) => {
                   const filterValue = filters[col.key as keyof SecureClientFilters];
                   const hasFilter = isSecureClientFilterActive(filterValue);
-                  const clearFilterValue =
-                    col.filterType === "select" ? [] : "";
+                  const clearFilterValue = emptyFilterValueForColumn(col);
 
                   let FilterIcon = Filter;
                   if (col.filterType === "text" || col.filterType === "number") {
@@ -954,7 +836,7 @@ function ClientsPage() {
                               <div className="text-[11px] font-semibold text-slate-200 uppercase tracking-wider">
                                 Filtrar {col.label}
                               </div>
-                              <ColumnFilter
+                              <ClientTableColumnFilter
                                 col={col}
                                 filters={filters}
                                 onChange={handleFiltersChange}
