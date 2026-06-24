@@ -189,6 +189,7 @@ function UsersCrud({ profileRole }: { profileRole: ProfileRole }) {
     queryFn: fetchAgentsWithCounts,
     enabled: isAgentsQueryReady,
     refetchOnMount: true,
+    refetchOnWindowFocus: true,
     staleTime: 30_000,
     select: (rows) =>
       profileRole === "Assistant"

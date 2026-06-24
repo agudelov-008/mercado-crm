@@ -99,6 +99,7 @@ import {
   canAddManualClient,
   canAssignClients,
   canBulkDeleteClients,
+  canBulkSelectClients,
   canEditClientProfile,
   canExportClientsToExcel,
   canImportClientBases,
@@ -220,11 +221,12 @@ function ClientsPage() {
   const canAddManual = canAddManualClient(profileRole);
   const canExport = canExportClientsToExcel(profileRole);
   const canBulkDelete = canBulkDeleteClients(profileRole);
+  const canBulkSelect = canBulkSelectClients(profileRole);
   const visibleColumns = useMemo(
     () => getVisibleClientTableColumns(profileRole),
     [profileRole],
   );
-  const tableColSpan = visibleColumns.length + (canBulkDelete ? 2 : 1);
+  const tableColSpan = visibleColumns.length + (canBulkSelect ? 2 : 1);
   const [isExporting, setIsExporting] = useState(false);
   const [filters, setFilters] = useState<SecureClientFilters>(EMPTY_FILTERS);
   const [sort, setSort] = useState<SecureClientSort | null>(null);
@@ -410,6 +412,7 @@ function ClientsPage() {
     },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: ["secure-clients"] });
+      void queryClient.invalidateQueries({ queryKey: ["team-agents"] });
     },
   });
 
@@ -428,6 +431,7 @@ function ClientsPage() {
     },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: ["secure-clients"] });
+      void queryClient.invalidateQueries({ queryKey: ["team-agents"] });
     },
   });
 
@@ -578,9 +582,12 @@ function ClientsPage() {
     }
   };
 
+  const tableHeaderStickyClass =
+    "sticky top-0 z-20 bg-surface-elevated shadow-[0_1px_0_0_hsl(var(--border))]";
+
   return (
-    <div className="p-6 lg:p-8 space-y-6 max-w-[1800px] mx-auto">
-      <div className="flex flex-wrap items-start justify-between gap-4">
+    <div className="mx-auto flex min-h-0 max-w-[1800px] flex-1 flex-col gap-6 p-6 lg:p-8">
+      <div className="flex shrink-0 flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold">Clients</h1>
           <p className="text-sm text-muted-foreground">
@@ -649,7 +656,7 @@ function ClientsPage() {
       </div>
 
       {canAssign && multiSelected && (
-        <div className="sticky top-0 z-20 rounded-xl border border-primary/40 bg-primary/10 backdrop-blur px-4 py-3 flex flex-wrap items-center justify-between gap-3 shadow-elegant">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/40 bg-primary/10 px-4 py-3 shadow-elegant">
           <p className="text-sm font-medium">
             {selectedPhones.size} clientes seleccionados
           </p>
@@ -701,7 +708,7 @@ function ClientsPage() {
         </div>
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <span>Clientes por página</span>
           <Select
@@ -752,7 +759,7 @@ function ClientsPage() {
         )}
       </div>
 
-      <div className="relative rounded-xl border border-border bg-card/40 overflow-hidden">
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-card/40">
         {isBulkProcessing && (
           <div
             className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-2 bg-background/70 backdrop-blur-sm"
@@ -763,14 +770,14 @@ function ClientsPage() {
             <p className="text-sm text-muted-foreground">Procesando lote en Supabase…</p>
           </div>
         )}
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[1800px]">
-            <thead className="bg-surface-elevated/60 text-xs uppercase tracking-wider text-muted-foreground">
+        <div className="min-h-0 flex-1 overflow-auto">
+          <table className="w-full min-w-[1800px] border-separate border-spacing-0 text-sm">
+            <thead className="text-xs uppercase tracking-wider text-muted-foreground">
               <tr>
-                {canBulkDelete && (
+                {canBulkSelect && (
                   <th
                     data-bulk-select-cell
-                    className="w-10 px-3 py-3"
+                    className={cn("w-10 px-3 py-3", tableHeaderStickyClass)}
                     onClick={(e) => e.stopPropagation()}
                   >
                     <Checkbox
@@ -797,7 +804,10 @@ function ClientsPage() {
                   return (
                     <th
                       key={col.key}
-                      className="text-left px-3 py-2 font-medium whitespace-nowrap align-middle"
+                      className={cn(
+                        "text-left px-3 py-2 font-medium whitespace-nowrap align-middle",
+                        tableHeaderStickyClass,
+                      )}
                     >
                       <div className="flex items-center gap-1.5 min-h-8">
                         <span className="inline-flex items-center text-xs uppercase tracking-wider text-muted-foreground font-semibold">
@@ -867,7 +877,12 @@ function ClientsPage() {
                     </th>
                   );
                 })}
-                <th className="text-right px-4 py-3 font-medium min-w-[200px] align-middle">
+                <th
+                  className={cn(
+                    "text-right px-4 py-3 font-medium min-w-[200px] align-middle",
+                    tableHeaderStickyClass,
+                  )}
+                >
                   Actions
                 </th>
               </tr>
@@ -943,7 +958,7 @@ function ClientsPage() {
                         isSelected && "bg-primary/5",
                       )}
                     >
-                      {canBulkDelete && (
+                      {canBulkSelect && (
                         <td
                           data-bulk-select-cell
                           className="px-3 py-3 w-10"
@@ -1059,7 +1074,7 @@ function ClientsPage() {
       </div>
 
       {!isLoadingClients && totalCount > 0 && (
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-muted-foreground tabular-nums">
             {pageFrom}–{pageTo} de {totalCount} cliente{totalCount === 1 ? "" : "s"}
           </p>

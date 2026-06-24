@@ -238,6 +238,7 @@ function OwnerAssignmentField({
         queryKey: ["secure-client", client.phone],
       });
       void queryClient.invalidateQueries({ queryKey: ["secure-clients"] });
+      void queryClient.invalidateQueries({ queryKey: ["team-agents"] });
     },
     onError: (err) => {
       toast.error(

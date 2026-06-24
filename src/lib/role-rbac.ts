@@ -124,6 +124,11 @@ export function canBulkDeleteClients(role: ProfileRole | null): boolean {
   return role === "Admin";
 }
 
+/** Selección múltiple en My Clients (asignar, cambiar status o eliminar según rol). */
+export function canBulkSelectClients(role: ProfileRole | null): boolean {
+  return canBulkDeleteClients(role) || canAssignClients(role);
+}
+
 const RESTRICTED_COLUMNS_FOR_FIELD_ROLES: SecureClientColumn[] = [
   "owner_name",
   "previous_owner_name",

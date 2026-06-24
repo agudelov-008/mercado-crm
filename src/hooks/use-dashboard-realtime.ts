@@ -15,6 +15,7 @@ function invalidateDashboardData(queryClient: ReturnType<typeof useQueryClient>)
   void queryClient.invalidateQueries({ queryKey: ["dashboard-priority-clients"] });
   void queryClient.invalidateQueries({ queryKey: ["secure-clients"] });
   void queryClient.invalidateQueries({ queryKey: ["secure-client"] });
+  void queryClient.invalidateQueries({ queryKey: ["team-agents"] });
 }
 
 /** Sincroniza clientes y actividad cuando cambian en Supabase (p. ej. tras Llamar). */
@@ -26,7 +27,17 @@ export function useClientsRealtime() {
       .channel("realtime-clients-contact")
       .on(
         "postgres_changes",
+        { event: "INSERT", schema: "public", table: "clients" },
+        () => invalidateDashboardData(queryClient),
+      )
+      .on(
+        "postgres_changes",
         { event: "UPDATE", schema: "public", table: "clients" },
+        () => invalidateDashboardData(queryClient),
+      )
+      .on(
+        "postgres_changes",
+        { event: "DELETE", schema: "public", table: "clients" },
         () => invalidateDashboardData(queryClient),
       )
       .on(

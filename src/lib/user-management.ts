@@ -322,21 +322,24 @@ export async function countClientsByOwnerIds(
   if (ownerIds.length === 0) return new Map();
 
   try {
-    const { data, error } = await supabase
-      .from("clients")
-      .select("owner_id")
-      .in("owner_id", ownerIds);
+    const countEntries = await Promise.all(
+      ownerIds.map(async (ownerId) => {
+        const { count, error } = await supabase
+          .from("clients")
+          .select("phone", { count: "exact", head: true })
+          .eq("owner_id", ownerId);
 
-    if (error) throw error;
+        if (error) throw error;
+        return [ownerId, count ?? 0] as const;
+      }),
+    );
 
-    const counts = new Map<string, number>();
-    for (const row of data ?? []) {
-      const ownerId = (row as { owner_id: string | null }).owner_id;
-      if (!ownerId) continue;
-      counts.set(ownerId, (counts.get(ownerId) ?? 0) + 1);
-    }
-    return counts;
-  } catch {
-    return new Map();
+    return new Map(countEntries);
+  } catch (err) {
+    const message =
+      err instanceof Error
+        ? err.message
+        : "No se pudieron contar los clientes por asesor.";
+    throw new Error(message);
   }
 }
