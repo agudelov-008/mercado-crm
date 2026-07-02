@@ -458,17 +458,32 @@ const GLOBAL_SEARCH_COLUMNS = [
   "tp_account",
 ] as const;
 
+function escapePostgrestFilterValue(value: string): string {
+  if (/[,.()]/.test(value) || value.includes('"')) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+}
+
+function buildGlobalSearchOrFilter(token: string): string {
+  const pattern = escapePostgrestFilterValue(`%${token}%`);
+  return GLOBAL_SEARCH_COLUMNS.map((col) => `${col}.ilike.${pattern}`).join(",");
+}
+
 function applyGlobalSearch<T extends { or: (filters: string) => T }>(
   query: T,
   globalSearch?: string,
 ): T {
   const term = globalSearch?.trim();
   if (!term) return query;
-  const pattern = `%${term}%`;
-  const orFilter = GLOBAL_SEARCH_COLUMNS.map(
-    (col) => `${col}.ilike.${pattern}`,
-  ).join(",");
-  return query.or(orFilter);
+
+  const tokens = term.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return query;
+
+  for (const token of tokens) {
+    query = query.or(buildGlobalSearchOrFilter(token));
+  }
+  return query;
 }
 
 export function clientDetailIdFromPhone(phone: string): string {

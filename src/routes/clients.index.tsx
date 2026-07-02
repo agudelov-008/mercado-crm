@@ -586,10 +586,10 @@ function ClientsPage() {
     "sticky top-0 z-20 bg-surface-elevated shadow-[0_1px_0_0_hsl(var(--border))]";
 
   return (
-    <div className="mx-auto flex min-h-0 max-w-[1800px] flex-1 flex-col gap-6 p-6 lg:p-8">
-      <div className="flex shrink-0 flex-wrap items-start justify-between gap-4">
+    <div className="mx-auto flex h-full min-h-0 w-full max-w-[1800px] flex-1 flex-col gap-4 overflow-hidden p-4 md:p-6">
+      <div className="flex shrink-0 flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">Clients</h1>
+          <h1 className="text-xl md:text-2xl font-semibold">Clients</h1>
           <p className="text-sm text-muted-foreground">
             {isLoadingClients
               ? "Cargando clientes…"
@@ -708,58 +708,7 @@ function ClientsPage() {
         </div>
       )}
 
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <span>Clientes por página</span>
-          <Select
-            value={String(pageSize)}
-            onValueChange={(v) => handlePageSizeChange(Number(v) as ClientPageSize)}
-            disabled={isLoadingClients}
-          >
-            <SelectTrigger className="h-9 w-[88px] bg-surface-elevated border-border">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {CLIENT_PAGE_SIZE_OPTIONS.map((size) => (
-                <SelectItem key={size} value={String(size)}>
-                  {size}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        {!isLoadingClients && totalCount > 0 && (
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-9 w-9 p-0"
-              disabled={page <= 0 || isBulkProcessing}
-              onClick={() => goToPage(page - 1)}
-              aria-label="Página anterior"
-            >
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-            <span className="text-sm text-muted-foreground tabular-nums min-w-[120px] text-center">
-              Página {page + 1} de {totalPages}
-            </span>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-9 w-9 p-0"
-              disabled={page >= totalPages - 1 || isBulkProcessing}
-              onClick={() => goToPage(page + 1)}
-              aria-label="Página siguiente"
-            >
-              <ArrowRight className="h-4 w-4" />
-            </Button>
-          </div>
-        )}
-      </div>
-
-      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-card/40">
+      <div className="relative flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-card/40 shadow-sm">
         {isBulkProcessing && (
           <div
             className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-2 bg-background/70 backdrop-blur-sm"
@@ -770,14 +719,70 @@ function ClientsPage() {
             <p className="text-sm text-muted-foreground">Procesando lote en Supabase…</p>
           </div>
         )}
-        <div className="min-h-0 flex-1 overflow-auto">
-          <table className="w-full min-w-[1800px] border-separate border-spacing-0 text-sm">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-surface-elevated/30 px-3 py-2">
+          <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+            {!isLoadingClients && totalCount > 0 && (
+              <span className="tabular-nums whitespace-nowrap">
+                {pageFrom}–{pageTo} de {totalCount}
+              </span>
+            )}
+            <span className="hidden sm:inline text-border">|</span>
+            <span className="whitespace-nowrap">Por página</span>
+            <Select
+              value={String(pageSize)}
+              onValueChange={(v) => handlePageSizeChange(Number(v) as ClientPageSize)}
+              disabled={isLoadingClients}
+            >
+              <SelectTrigger className="h-8 w-[76px] bg-surface-elevated border-border text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {CLIENT_PAGE_SIZE_OPTIONS.map((size) => (
+                  <SelectItem key={size} value={String(size)}>
+                    {size}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {!isLoadingClients && totalCount > 0 && (
+            <div className="flex items-center gap-1.5">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 w-8 p-0"
+                disabled={page <= 0 || isBulkProcessing}
+                onClick={() => goToPage(page - 1)}
+                aria-label="Página anterior"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+              </Button>
+              <span className="text-xs text-muted-foreground tabular-nums min-w-[88px] text-center">
+                {page + 1} / {totalPages}
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 w-8 p-0"
+                disabled={page >= totalPages - 1 || isBulkProcessing}
+                onClick={() => goToPage(page + 1)}
+                aria-label="Página siguiente"
+              >
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          )}
+        </div>
+        <div className="min-h-0 flex-1 overflow-x-auto overflow-y-auto overscroll-x-contain">
+          <table className="w-full min-w-[1200px] xl:min-w-[1600px] border-separate border-spacing-0 text-xs lg:text-sm">
             <thead className="text-xs uppercase tracking-wider text-muted-foreground">
               <tr>
                 {canBulkSelect && (
                   <th
                     data-bulk-select-cell
-                    className={cn("w-10 px-3 py-3", tableHeaderStickyClass)}
+                    className={cn("w-10 px-2 py-2 lg:px-3 lg:py-2.5", tableHeaderStickyClass)}
                     onClick={(e) => e.stopPropagation()}
                   >
                     <Checkbox
@@ -805,7 +810,7 @@ function ClientsPage() {
                     <th
                       key={col.key}
                       className={cn(
-                        "text-left px-3 py-2 font-medium whitespace-nowrap align-middle",
+                        "text-left px-2 py-1.5 lg:px-3 lg:py-2 font-medium whitespace-nowrap align-middle",
                         tableHeaderStickyClass,
                       )}
                     >
@@ -879,7 +884,7 @@ function ClientsPage() {
                 })}
                 <th
                   className={cn(
-                    "text-right px-4 py-3 font-medium min-w-[200px] align-middle",
+                    "text-right px-3 py-2 lg:px-4 lg:py-2.5 font-medium min-w-[140px] lg:min-w-[180px] align-middle",
                     tableHeaderStickyClass,
                   )}
                 >
@@ -961,7 +966,7 @@ function ClientsPage() {
                       {canBulkSelect && (
                         <td
                           data-bulk-select-cell
-                          className="px-3 py-3 w-10"
+                          className="px-2 py-2 lg:px-3 lg:py-2.5 w-10"
                           onClick={(e) => e.stopPropagation()}
                         >
                           <Checkbox
@@ -984,7 +989,7 @@ function ClientsPage() {
                           <td
                             key={`${row.phone}-${col.key}`}
                             className={cn(
-                              "px-3 py-3 whitespace-nowrap max-w-[200px] truncate",
+                              "px-2 py-2 lg:px-3 lg:py-2.5 whitespace-nowrap max-w-[160px] lg:max-w-[200px] truncate",
                               maskContact && isContactCol && "select-none",
                             )}
                             title={cellTitle}
@@ -1013,7 +1018,7 @@ function ClientsPage() {
                           </td>
                         );
                       })}
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-2 lg:px-4 lg:py-2.5">
                         <div className="flex justify-end items-center gap-1.5 flex-wrap">
                           <Button
                             type="button"
@@ -1072,57 +1077,6 @@ function ClientsPage() {
           </table>
         </div>
       </div>
-
-      {!isLoadingClients && totalCount > 0 && (
-        <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-muted-foreground tabular-nums">
-            {pageFrom}–{pageTo} de {totalCount} cliente{totalCount === 1 ? "" : "s"}
-          </p>
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">Por página</span>
-            <Select
-              value={String(pageSize)}
-              onValueChange={(v) => handlePageSizeChange(Number(v) as ClientPageSize)}
-            >
-              <SelectTrigger className="h-9 w-[88px] bg-surface-elevated border-border">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {CLIENT_PAGE_SIZE_OPTIONS.map((size) => (
-                  <SelectItem key={size} value={String(size)}>
-                    {size}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-9 w-9 p-0"
-              disabled={page <= 0}
-              onClick={() => goToPage(page - 1)}
-              aria-label="Página anterior"
-            >
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-            <span className="text-sm text-muted-foreground tabular-nums">
-              {page + 1} / {totalPages}
-            </span>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-9 w-9 p-0"
-              disabled={page >= totalPages - 1}
-              onClick={() => goToPage(page + 1)}
-              aria-label="Página siguiente"
-            >
-              <ArrowRight className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-      )}
 
       <Dialog
         open={deleteOpen}
