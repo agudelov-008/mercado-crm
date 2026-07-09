@@ -212,9 +212,18 @@ export function ClientPageNavColumn({
         <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
           Clientes
         </p>
-        <p className="text-xs text-muted-foreground mt-0.5 tabular-nums">
-          Página {listContext.page} de {totalPages}
-        </p>
+        {listContext.search?.trim() ? (
+          <p
+            className="text-xs text-primary mt-0.5 truncate"
+            title={listContext.search}
+          >
+            Buscando: {listContext.search}
+          </p>
+        ) : (
+          <p className="text-xs text-muted-foreground mt-0.5 tabular-nums">
+            Página {listContext.page} de {totalPages}
+          </p>
+        )}
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-2 py-2">
@@ -228,7 +237,9 @@ export function ClientPageNavColumn({
           </p>
         ) : clients.length === 0 ? (
           <p className="px-2 py-4 text-xs text-muted-foreground">
-            Sin clientes en esta página.
+            {listContext.search?.trim()
+              ? "Sin coincidencias para tu búsqueda."
+              : "Sin clientes en esta página."}
           </p>
         ) : (
           <ul className="flex flex-col gap-0.5">

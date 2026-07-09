@@ -193,8 +193,8 @@ function TickerSegment({ item }: { item: TickerItem }) {
       className="flex shrink-0 items-center gap-2 px-6 text-xs tabular-nums"
       aria-label={`${item.symbol} ${item.value} ${item.change}`}
     >
-      <span className="font-semibold tracking-wide text-white/90">{item.symbol}</span>
-      <span className="text-white/60">{item.value}</span>
+      <span className="font-semibold tracking-wide text-foreground">{item.symbol}</span>
+      <span className="text-muted-foreground">{item.value}</span>
       <span
         className={cn(
           "inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-semibold",
@@ -206,7 +206,7 @@ function TickerSegment({ item }: { item: TickerItem }) {
         </span>
         {item.change}
       </span>
-      <span className="text-white/15" aria-hidden>
+      <span className="text-border" aria-hidden>
         |
       </span>
     </div>
@@ -215,12 +215,12 @@ function TickerSegment({ item }: { item: TickerItem }) {
 
 function TickerSkeleton() {
   return (
-    <div className="group relative overflow-hidden border-b border-white/[0.06] bg-[#0b0b0b]">
+    <div className="group relative overflow-hidden border-b border-border bg-surface">
       <div className="flex w-full items-center gap-3 overflow-hidden px-6 py-2.5">
         {Array.from({ length: 6 }).map((_, index) => (
           <div
             key={`ticker-skeleton-${index}`}
-            className="h-4 w-28 animate-pulse rounded bg-white/10"
+            className="h-4 w-28 animate-pulse rounded bg-muted"
           />
         ))}
       </div>
@@ -285,11 +285,11 @@ export function MarketTicker() {
 
   return (
     <div
-      className="group relative overflow-hidden border-b border-white/[0.06] bg-[#0b0b0b]"
+      className="group relative overflow-hidden border-b border-border bg-surface"
       role="region"
       aria-label="Ticker financiero Five Elements"
     >
-      <div className="pointer-events-none absolute right-2 top-1/2 z-10 -translate-y-1/2 rounded-md border border-white/10 bg-black/70 px-2 py-1 text-[10px] text-white/65 backdrop-blur">
+      <div className="pointer-events-none absolute right-2 top-1/2 z-10 -translate-y-1/2 rounded-md border border-border bg-background/80 px-2 py-1 text-[10px] text-muted-foreground backdrop-blur">
         <span
           className={cn(
             "mr-1 inline-block h-1.5 w-1.5 rounded-full align-middle",

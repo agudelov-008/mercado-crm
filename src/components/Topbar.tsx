@@ -7,7 +7,9 @@ import { BRAND_LOGO_SOLO, BRAND_NAME } from "@/lib/brand";
 import {
   isClientDetailPath,
   isClientsIndexPath,
+  mergeClientDetailNavSearch,
   mergeClientsIndexSearch,
+  readClientDetailNavSearch,
   readClientsIndexSearch,
 } from "@/lib/clients-route-search";
 import { getProfileRoleLabel } from "@/lib/role-rbac";
@@ -21,6 +23,9 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { SidebarMenuTrigger, useSidebarMenuState } from "@/components/Sidebar";
+import { ThemeToggle } from "@/components/ThemeToggle";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 const GLOBAL_SEARCH_DEBOUNCE_MS = 300;
 
@@ -28,16 +33,21 @@ export function Topbar() {
   const { profileRole, currentUser } = useApp();
   const { handleLogout } = useAuth();
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
+  const { desktopExpanded } = useSidebarMenuState();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const urlSearchTerm = useRouterState({
-    select: (state) =>
-      isClientsIndexPath(state.location.pathname)
-        ? readClientsIndexSearch(
-            state.location.search as Record<string, unknown>,
-          )
-        : null,
+    select: (state) => {
+      const routeSearch = state.location.search as Record<string, unknown>;
+      if (isClientsIndexPath(state.location.pathname)) {
+        return readClientsIndexSearch(routeSearch);
+      }
+      if (isClientDetailPath(state.location.pathname)) {
+        return readClientDetailNavSearch(routeSearch);
+      }
+      return null;
+    },
   });
-
   const [inputValue, setInputValue] = useState("");
   const debouncedSearch = useDebouncedValue(inputValue, GLOBAL_SEARCH_DEBOUNCE_MS);
   const isOnClientsIndex = isClientsIndexPath(pathname);
@@ -47,26 +57,30 @@ export function Topbar() {
   const roleLabel =
     profileRole !== null ? getProfileRoleLabel(profileRole) : "…";
 
-  // Sync input from URL only on the clients list route.
+  const showTopbarLogo = isMobile || !desktopExpanded;
+
+  // Sync input from URL on clients list and client detail routes.
   useEffect(() => {
-    if (!isOnClientsIndex || urlSearchTerm === null) return;
+    if (urlSearchTerm === null) return;
+    if (!isOnClientsIndex && !isOnClientDetail) return;
     isUserTypingRef.current = false;
     setInputValue(urlSearchTerm);
-  }, [urlSearchTerm, isOnClientsIndex]);
+  }, [urlSearchTerm, isOnClientsIndex, isOnClientDetail]);
 
   // Push debounced input to URL only when the user is actively typing.
   useEffect(() => {
-    if (isOnClientDetail || !isUserTypingRef.current) return;
+    if (!isUserTypingRef.current) return;
+    if (!isOnClientsIndex && !isOnClientDetail) return;
 
     const trimmed = debouncedSearch.trim();
+    const current = (urlSearchTerm ?? "").trim();
+
+    if (trimmed === current) {
+      isUserTypingRef.current = false;
+      return;
+    }
 
     if (isOnClientsIndex) {
-      const current = (urlSearchTerm ?? "").trim();
-      if (trimmed === current) {
-        isUserTypingRef.current = false;
-        return;
-      }
-
       void navigate({
         to: "/clients",
         search: (prev) =>
@@ -80,18 +94,20 @@ export function Topbar() {
       return;
     }
 
-    if (trimmed) {
+    if (isOnClientDetail) {
       void navigate({
-        to: "/clients",
-        search: (prev) =>
-          mergeClientsIndexSearch(prev, {
-            search: trimmed,
-            page: undefined,
-          }),
+        search: (prev) => mergeClientDetailNavSearch(prev, { search: trimmed || undefined }),
+        replace: true,
       });
+      isUserTypingRef.current = false;
     }
-    isUserTypingRef.current = false;
-  }, [debouncedSearch, isOnClientDetail, isOnClientsIndex, navigate, urlSearchTerm]);
+  }, [
+    debouncedSearch,
+    isOnClientDetail,
+    isOnClientsIndex,
+    navigate,
+    urlSearchTerm,
+  ]);
 
   const handleSearchChange = (value: string) => {
     isUserTypingRef.current = true;
@@ -99,12 +115,15 @@ export function Topbar() {
   };
 
   return (
-    <header className="h-16 border-b border-border bg-surface/60 backdrop-blur flex items-center px-4 md:px-6 gap-4">
-      <img
-        src={BRAND_LOGO_SOLO}
-        alt={`${BRAND_NAME} isotipo`}
-        className="h-8 w-8 object-contain shrink-0 md:hidden"
-      />
+    <header className="h-16 border-b border-border bg-surface/60 backdrop-blur flex items-center px-4 md:px-6 gap-3 md:gap-4">
+      <SidebarMenuTrigger />
+      {showTopbarLogo && (
+        <img
+          src={BRAND_LOGO_SOLO}
+          alt={`${BRAND_NAME} isotipo`}
+          className="h-8 w-8 object-contain shrink-0"
+        />
+      )}
 
       <div className="relative flex-1 max-w-md">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -118,6 +137,8 @@ export function Topbar() {
       </div>
 
       <div className="flex items-center gap-3 ml-auto">
+        <ThemeToggle />
+
         <div className="hidden sm:flex items-center gap-2 px-3 h-9 rounded-md bg-surface-elevated border border-border text-sm">
           <span className="h-2 w-2 rounded-full bg-primary" />
           <span className="font-medium">{roleLabel}</span>

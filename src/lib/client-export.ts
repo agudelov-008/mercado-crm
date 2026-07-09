@@ -29,7 +29,6 @@ function rowToExportRecord(row: SecureClientWithOwners): Record<string, string |
     "Created On": formatClientDate(row.created_on),
     "Last Assignment": formatClientDateTime(row.last_assignment),
     "Last Contacted": formatLastContacted(row.last_contacted),
-    "Updated At": formatClientDate(row.updated_at),
   };
 }
 

@@ -390,7 +390,7 @@ export interface ClientTableColumnDef {
   filterType: ColumnFilterType;
 }
 
-/** Columnas expuestas por la vista `secure_clients` (17 campos de datos). */
+/** Columnas expuestas por la vista `secure_clients` (16 campos de datos). */
 export const CLIENT_TABLE_COLUMNS: ClientTableColumnDef[] = [
   { key: "first_name", label: "First Name", filterType: "text" },
   { key: "last_name", label: "Last Name", filterType: "text" },
@@ -415,7 +415,6 @@ export const CLIENT_TABLE_COLUMNS: ClientTableColumnDef[] = [
   { key: "created_on", label: "Created On", filterType: "date" },
   { key: "last_assignment", label: "Last Assignment", filterType: "date" },
   { key: "last_contacted", label: "Last Contacted", filterType: "date" },
-  { key: "updated_at", label: "Updated At", filterType: "date" },
 ];
 
 export function isDropdownFilterType(filterType: ColumnFilterType): boolean {
@@ -556,6 +555,120 @@ export type SecureClientsPageResult = {
   totalCount: number;
 };
 
+const EXPORT_BATCH_SIZE = 1000;
+
+function buildSecureClientsListQuery(
+  filters: SecureClientFilters,
+  sort: SecureClientSort | null,
+  globalSearch?: string,
+  ownerId?: string,
+) {
+  let query = supabase
+    .from("secure_clients")
+    .select(SELECT_WITH_PROFILES, { count: "exact" });
+
+  if (ownerId) {
+    query = query.eq("owner_id", ownerId);
+  }
+
+  for (const key of TEXT_FILTER_KEYS) {
+    const value = filters[key].trim();
+    if (value) {
+      query = query.ilike(key, `%${value}%`);
+    }
+  }
+
+  query = applyDropdownFilters(query, filters);
+
+  const totalCallsRaw = filters.total_calls.trim();
+  if (totalCallsRaw !== "") {
+    const totalCalls = Number(totalCallsRaw);
+    if (!Number.isNaN(totalCalls)) {
+      query = query.eq("total_calls", totalCalls);
+    }
+  }
+
+  const dateFilters: Array<{ column: DateFilterKey; value: string }> = [
+    { column: "created_on", value: filters.created_on },
+    { column: "last_assignment", value: filters.last_assignment },
+    { column: "last_contacted", value: filters.last_contacted },
+    { column: "updated_at", value: filters.updated_at },
+  ];
+
+  for (const { column, value } of dateFilters) {
+    if (!value) continue;
+    query = query.gte(column, `${value}T00:00:00`).lte(column, `${value}T23:59:59`);
+  }
+
+  query = applyGlobalSearch(query, globalSearch);
+
+  if (sort) {
+    query = query.order(sort.column, {
+      ascending: sort.direction === "asc",
+      nullsFirst: false,
+    });
+  } else {
+    query = query.order("created_on", {
+      ascending: false,
+      nullsFirst: false,
+    });
+  }
+
+  return query;
+}
+
+function mapSecureClientRows(
+  data: ClientRowWithProfileJoins[] | null,
+): SecureClientWithOwners[] {
+  return (data ?? []).map(mapClientRowWithProfiles);
+}
+
+async function fetchSecureClientsPage(
+  buildQuery: () => ReturnType<typeof buildSecureClientsListQuery>,
+  pagination: { page: number; pageSize: ClientPageSize },
+): Promise<SecureClientsPageResult> {
+  const from = pagination.page * pagination.pageSize;
+  const to = from + pagination.pageSize - 1;
+  const { data, error, count } = await buildQuery().range(from, to);
+  if (error) throw error;
+  return {
+    rows: mapSecureClientRows(data as unknown as ClientRowWithProfileJoins[] | null),
+    totalCount: count ?? 0,
+  };
+}
+
+async function fetchAllSecureClientsForExportInternal(
+  buildQuery: () => ReturnType<typeof buildSecureClientsListQuery>,
+): Promise<SecureClientWithOwners[]> {
+  const allRows: SecureClientWithOwners[] = [];
+  let offset = 0;
+  let expectedTotal: number | null = null;
+
+  while (true) {
+    const from = offset;
+    const to = offset + EXPORT_BATCH_SIZE - 1;
+    const { data, error, count } = await buildQuery().range(from, to);
+    if (error) throw error;
+
+    if (expectedTotal === null) {
+      expectedTotal = count ?? 0;
+      if (expectedTotal === 0) return [];
+    }
+
+    const batch = mapSecureClientRows(
+      data as unknown as ClientRowWithProfileJoins[] | null,
+    );
+    allRows.push(...batch);
+
+    if (allRows.length >= expectedTotal || batch.length < EXPORT_BATCH_SIZE) {
+      break;
+    }
+    offset += EXPORT_BATCH_SIZE;
+  }
+
+  return allRows;
+}
+
 export async function fetchSecureClientsByOwnerId(
   ownerId: string,
   filters: SecureClientFilters,
@@ -564,65 +677,10 @@ export async function fetchSecureClientsByOwnerId(
   globalSearch?: string,
 ): Promise<SecureClientsPageResult> {
   try {
-    const from = pagination.page * pagination.pageSize;
-    const to = from + pagination.pageSize - 1;
-
-    let query = supabase
-      .from("secure_clients")
-      .select(SELECT_WITH_PROFILES, { count: "exact" })
-      .eq("owner_id", ownerId);
-
-    for (const key of TEXT_FILTER_KEYS) {
-      const value = filters[key].trim();
-      if (value) {
-        query = query.ilike(key, `%${value}%`);
-      }
-    }
-
-    query = applyDropdownFilters(query, filters);
-
-    const totalCallsRaw = filters.total_calls.trim();
-    if (totalCallsRaw !== "") {
-      const totalCalls = Number(totalCallsRaw);
-      if (!Number.isNaN(totalCalls)) {
-        query = query.eq("total_calls", totalCalls);
-      }
-    }
-
-    const dateFilters: Array<{ column: DateFilterKey; value: string }> = [
-      { column: "created_on", value: filters.created_on },
-      { column: "last_assignment", value: filters.last_assignment },
-      { column: "last_contacted", value: filters.last_contacted },
-      { column: "updated_at", value: filters.updated_at },
-    ];
-
-    for (const { column, value } of dateFilters) {
-      if (!value) continue;
-      query = query.gte(column, `${value}T00:00:00`).lte(column, `${value}T23:59:59`);
-    }
-
-    query = applyGlobalSearch(query, globalSearch);
-
-    if (sort) {
-      query = query.order(sort.column, {
-        ascending: sort.direction === "asc",
-        nullsFirst: false,
-      });
-    } else {
-      query = query.order("created_on", {
-        ascending: false,
-        nullsFirst: false,
-      });
-    }
-
-    const { data, error, count } = await query.range(from, to);
-    if (error) throw error;
-    return {
-      rows: ((data ?? []) as unknown as ClientRowWithProfileJoins[]).map(
-        mapClientRowWithProfiles,
-      ),
-      totalCount: count ?? 0,
-    };
+    return await fetchSecureClientsPage(
+      () => buildSecureClientsListQuery(filters, sort, globalSearch, ownerId),
+      pagination,
+    );
   } catch (err) {
     const message =
       err instanceof Error
@@ -639,67 +697,50 @@ export async function fetchSecureClients(
   globalSearch?: string,
 ): Promise<SecureClientsPageResult> {
   try {
-    const from = pagination.page * pagination.pageSize;
-    const to = from + pagination.pageSize - 1;
-
-    let query = supabase
-      .from("secure_clients")
-      .select(SELECT_WITH_PROFILES, { count: "exact" });
-
-    for (const key of TEXT_FILTER_KEYS) {
-      const value = filters[key].trim();
-      if (value) {
-        query = query.ilike(key, `%${value}%`);
-      }
-    }
-
-    query = applyDropdownFilters(query, filters);
-
-    const totalCallsRaw = filters.total_calls.trim();
-    if (totalCallsRaw !== "") {
-      const totalCalls = Number(totalCallsRaw);
-      if (!Number.isNaN(totalCalls)) {
-        query = query.eq("total_calls", totalCalls);
-      }
-    }
-
-    const dateFilters: Array<{ column: DateFilterKey; value: string }> = [
-      { column: "created_on", value: filters.created_on },
-      { column: "last_assignment", value: filters.last_assignment },
-      { column: "last_contacted", value: filters.last_contacted },
-      { column: "updated_at", value: filters.updated_at },
-    ];
-
-    for (const { column, value } of dateFilters) {
-      if (!value) continue;
-      query = query.gte(column, `${value}T00:00:00`).lte(column, `${value}T23:59:59`);
-    }
-
-    query = applyGlobalSearch(query, globalSearch);
-
-    if (sort) {
-      query = query.order(sort.column, {
-        ascending: sort.direction === "asc",
-        nullsFirst: false,
-      });
-    } else {
-      query = query.order("created_on", {
-        ascending: false,
-        nullsFirst: false,
-      });
-    }
-
-    const { data, error, count } = await query.range(from, to);
-    if (error) throw error;
-    return {
-      rows: ((data ?? []) as unknown as ClientRowWithProfileJoins[]).map(
-        mapClientRowWithProfiles,
-      ),
-      totalCount: count ?? 0,
-    };
+    return await fetchSecureClientsPage(
+      () => buildSecureClientsListQuery(filters, sort, globalSearch),
+      pagination,
+    );
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "No se pudieron cargar los clientes.";
+    throw new Error(message);
+  }
+}
+
+export async function fetchAllSecureClientsByOwnerIdForExport(
+  ownerId: string,
+  filters: SecureClientFilters,
+  sort: SecureClientSort | null,
+  globalSearch?: string,
+): Promise<SecureClientWithOwners[]> {
+  try {
+    return await fetchAllSecureClientsForExportInternal(() =>
+      buildSecureClientsListQuery(filters, sort, globalSearch, ownerId),
+    );
+  } catch (err) {
+    const message =
+      err instanceof Error
+        ? err.message
+        : "No se pudieron exportar los clientes del asesor.";
+    throw new Error(message);
+  }
+}
+
+export async function fetchAllSecureClientsForExport(
+  filters: SecureClientFilters,
+  sort: SecureClientSort | null,
+  globalSearch?: string,
+): Promise<SecureClientWithOwners[]> {
+  try {
+    return await fetchAllSecureClientsForExportInternal(() =>
+      buildSecureClientsListQuery(filters, sort, globalSearch),
+    );
+  } catch (err) {
+    const message =
+      err instanceof Error
+        ? err.message
+        : "No se pudieron exportar los clientes.";
     throw new Error(message);
   }
 }

@@ -3,7 +3,7 @@ import { useEffect } from "react";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { useClientsRealtime } from "@/hooks/use-dashboard-realtime";
 import { useApp } from "@/lib/app-context";
-import { Sidebar } from "./Sidebar";
+import { Sidebar, SidebarMenuProvider } from "./Sidebar";
 import { Topbar } from "./Topbar";
 import { MarketTicker } from "./MarketTicker";
 
@@ -30,17 +30,19 @@ export function AppShell({ children }: { children: ReactNode }) {
   const showMarketTicker = profileRole !== "Affiliate";
 
   return (
-    <div className="dark h-screen flex flex-col overflow-hidden bg-background text-foreground">
-      {showMarketTicker && <MarketTicker />}
-      <div className="flex flex-1 min-h-0">
-        <Sidebar />
-        <div className="flex-1 flex flex-col min-w-0">
-          <Topbar />
-          <main className="flex flex-col flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
-            {children}
-          </main>
+    <SidebarMenuProvider>
+      <div className="h-screen flex flex-col overflow-hidden bg-background text-foreground">
+        {showMarketTicker && <MarketTicker />}
+        <div className="flex flex-1 min-h-0">
+          <Sidebar />
+          <div className="flex-1 flex flex-col min-w-0">
+            <Topbar />
+            <main className="flex flex-col flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
+              {children}
+            </main>
+          </div>
         </div>
       </div>
-    </div>
+    </SidebarMenuProvider>
   );
 }

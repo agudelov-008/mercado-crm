@@ -848,7 +848,7 @@ export function ClientImportModal({ open, onOpenChange }: ClientImportModalProps
                       value={mapping[field.key] ?? "__none__"}
                       onValueChange={(v) => updateMapping(field.key, v)}
                     >
-                      <SelectTrigger className="h-9 bg-slate-900 border-slate-800 text-sm">
+                      <SelectTrigger className="h-9 bg-surface-elevated border-border text-sm">
                         <SelectValue placeholder="Columna del archivo" />
                       </SelectTrigger>
                       <SelectContent>

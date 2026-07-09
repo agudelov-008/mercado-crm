@@ -70,6 +70,7 @@ export const clientsListReturnContextSchema = z.object({
   page: z.number().int().min(1),
   pageSize: clientPageSizeSchema,
   search: z.string().optional(),
+  browsePage: z.number().int().min(1).optional(),
   filters: secureClientFiltersSchema,
   sort: secureClientSortSchema,
   totalPages: z.number().int().min(1),
@@ -79,6 +80,8 @@ export type ClientsListReturnContext = {
   page: number;
   pageSize: ClientPageSize;
   search?: string;
+  /** Page index in the unfiltered list, preserved while a nav search is active. */
+  browsePage?: number;
   filters: SecureClientFilters;
   sort: SecureClientSort | null;
   totalPages: number;
@@ -128,6 +131,50 @@ export function readClientsIndexSearch(
   search: Record<string, unknown>,
 ): string {
   return typeof search.search === "string" ? search.search : "";
+}
+
+export function readClientDetailNavSearch(
+  search: Record<string, unknown>,
+): string {
+  return resolveClientsListReturnContext(search).search?.trim() ?? "";
+}
+
+export function clientDetailIdFromPath(pathname: string): string | null {
+  if (!isClientDetailPath(pathname)) return null;
+  const slug = pathname.slice(`${CLIENTS_INDEX_PATH}/`.length).split("/")[0];
+  return slug || null;
+}
+
+export function mergeClientDetailNavSearch(
+  prev: Record<string, unknown>,
+  patch: { search?: string },
+): Partial<ClientDetailSearch> {
+  const parsed = clientDetailSearchSchema.safeParse(prev);
+  const edit = parsed.success ? parsed.data.edit : undefined;
+  const context = resolveClientsListReturnContext(prev);
+  const trimmedSearch = patch.search?.trim();
+  const hadSearch = Boolean(context.search?.trim());
+
+  const nextContext: ClientsListReturnContext = trimmedSearch
+    ? {
+        ...context,
+        search: trimmedSearch,
+        browsePage: hadSearch ? context.browsePage : context.page,
+        page: 1,
+      }
+    : {
+        ...context,
+        search: undefined,
+        page: context.browsePage ?? context.page,
+        browsePage: undefined,
+      };
+
+  return {
+    listCtx: encodeClientsListReturnContext(nextContext),
+    edit,
+    search: undefined,
+    q: undefined,
+  };
 }
 
 export const clientsListReturnSearchSchema = z.object({

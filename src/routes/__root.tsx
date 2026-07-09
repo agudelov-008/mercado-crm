@@ -11,8 +11,11 @@ import appCss from "../styles.css?url";
 import { BRAND_LOGO_SOLO, BRAND_NAME, BRAND_TAGLINE } from "@/lib/brand";
 import { AppProvider } from "@/lib/app-context";
 import { AuthGate, AuthProvider } from "@/lib/auth-context";
+import { ThemeProvider, useTheme } from "@/lib/theme-context";
 import { AppShell } from "@/components/AppShell";
 import { Toaster } from "@/components/ui/sonner";
+
+const THEME_INIT_SCRIPT = `(function(){try{var t=localStorage.getItem("crm_theme");document.documentElement.classList.toggle("dark",t!=="light");}catch(e){document.documentElement.classList.add("dark");}})();`;
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   head: () => ({
@@ -33,14 +36,22 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootShell({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className="dark">
-      <head><HeadContent /></head>
-      <body className="dark">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <HeadContent />
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
+      <body suppressHydrationWarning>
         {children}
         <Scripts />
       </body>
     </html>
   );
+}
+
+function ThemedToaster() {
+  const { isDark } = useTheme();
+  return <Toaster theme={isDark ? "dark" : "light"} />;
 }
 
 function RootComponent() {
@@ -51,20 +62,22 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider queryClient={queryClient}>
-        <AuthGate>
-          <AppProvider>
-            {isLoginRoute ? (
-              <Outlet />
-            ) : (
-              <AppShell>
+      <ThemeProvider>
+        <AuthProvider queryClient={queryClient}>
+          <AuthGate>
+            <AppProvider>
+              {isLoginRoute ? (
                 <Outlet />
-              </AppShell>
-            )}
-            <Toaster theme="dark" />
-          </AppProvider>
-        </AuthGate>
-      </AuthProvider>
+              ) : (
+                <AppShell>
+                  <Outlet />
+                </AppShell>
+              )}
+              <ThemedToaster />
+            </AppProvider>
+          </AuthGate>
+        </AuthProvider>
+      </ThemeProvider>
     </QueryClientProvider>
   );
 }

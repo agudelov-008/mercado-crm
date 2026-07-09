@@ -64,7 +64,7 @@ export function ClientTableColumnFilter({
         value={filters[key]}
         onChange={(e) => onChange({ ...filters, [key]: e.target.value })}
         placeholder="Filtrar…"
-        className="h-7 min-w-0 text-xs p-1 bg-slate-900 border-slate-800 text-slate-300 w-full rounded"
+        className="h-7 min-w-0 text-xs p-1 bg-surface-elevated border-border text-foreground w-full rounded"
         onClick={(e) => e.stopPropagation()}
       />
     );
@@ -80,7 +80,7 @@ export function ClientTableColumnFilter({
         value={filters[key]}
         onChange={(e) => onChange({ ...filters, [key]: e.target.value })}
         placeholder="0"
-        className="h-7 min-w-0 text-xs p-1 bg-slate-900 border-slate-800 text-slate-300 w-full rounded tabular-nums"
+        className="h-7 min-w-0 text-xs p-1 bg-surface-elevated border-border text-foreground w-full rounded tabular-nums"
         onClick={(e) => e.stopPropagation()}
         aria-label={`Filtrar ${col.label}`}
       />
@@ -102,14 +102,13 @@ export function ClientTableColumnFilter({
   const dateKey = col.key as
     | "created_on"
     | "last_assignment"
-    | "last_contacted"
-    | "updated_at";
+    | "last_contacted";
   return (
     <Input
       type="date"
       value={filters[dateKey]}
       onChange={(e) => onChange({ ...filters, [dateKey]: e.target.value })}
-      className="h-7 min-w-0 text-xs p-1 bg-slate-900 border-slate-800 text-slate-300 w-full rounded [color-scheme:dark]"
+      className="h-7 min-w-0 text-xs p-1 bg-surface-elevated border-border text-foreground w-full rounded"
       onClick={(e) => e.stopPropagation()}
       aria-label={`Filtrar ${col.label} por día`}
     />

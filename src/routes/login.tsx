@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/lib/supabase";
 import { BRAND_LOGO_FULL, BRAND_NAME } from "@/lib/brand";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 export const Route = createFileRoute("/login")({
   component: LoginPage,
@@ -70,7 +71,10 @@ function LoginPage() {
       </aside>
 
       {/* Lado Derecho (Formulario) */}
-      <main className="w-full lg:w-1/2 flex flex-col bg-background">
+      <main className="w-full lg:w-1/2 flex flex-col bg-background relative">
+        <div className="absolute top-4 right-4 z-10">
+          <ThemeToggle />
+        </div>
         {/* Logo en versión móvil (visible solo en pantallas pequeñas) */}
         <div className="lg:hidden p-6 border-b border-border flex justify-center">
           <img
@@ -83,7 +87,7 @@ function LoginPage() {
         <div className="flex-1 flex items-center justify-center p-6 sm:p-10">
           <div className="w-full max-w-sm space-y-8 animate-fade-in-up">
             <div>
-              <h2 className="text-2xl font-semibold text-white font-sans tracking-tight">Sign In</h2>
+              <h2 className="text-2xl font-semibold text-foreground font-sans tracking-tight">Sign In</h2>
               <p className="mt-1.5 text-sm text-muted-foreground">
                 Access your advisor workspace
               </p>
@@ -103,7 +107,7 @@ function LoginPage() {
                     placeholder="you@fiveelements.com"
                     required
                     autoComplete="email"
-                    className="pl-9 bg-slate-800/50 border-slate-700 text-foreground placeholder:text-muted-foreground"
+                    className="pl-9 bg-surface-elevated border-border text-foreground placeholder:text-muted-foreground"
                   />
                 </div>
               </div>
@@ -121,7 +125,7 @@ function LoginPage() {
                     placeholder="••••••••"
                     required
                     autoComplete="current-password"
-                    className="pl-9 bg-slate-800/50 border-slate-700 text-foreground placeholder:text-muted-foreground"
+                    className="pl-9 bg-surface-elevated border-border text-foreground placeholder:text-muted-foreground"
                   />
                 </div>
               </div>

@@ -81,8 +81,7 @@ function getCellValue(row: SecureClientWithOwners, column: SecureClientColumn): 
   }
   if (
     column === "created_on" ||
-    column === "last_assignment" ||
-    column === "updated_at"
+    column === "last_assignment"
   ) {
     return formatClientDate(String(value));
   }

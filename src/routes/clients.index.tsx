@@ -40,6 +40,8 @@ import {
   type ClientPageSize,
   type ClientTableColumnDef,
   EMPTY_FILTERS,
+  fetchAllSecureClientsByOwnerIdForExport,
+  fetchAllSecureClientsForExport,
   fetchSecureClients,
   fetchSecureClientsByOwnerId,
   emptyFilterValueForColumn,
@@ -135,8 +137,7 @@ function getCellValue(row: SecureClientWithOwners, column: SecureClientColumn): 
   }
   if (
     column === "created_on" ||
-    column === "last_assignment" ||
-    column === "updated_at"
+    column === "last_assignment"
   ) {
     return formatClientDate(String(value));
   }
@@ -564,15 +565,35 @@ function ClientsPage() {
     bulkOwnerMutation.mutate({ phones, ownerId: bulkAssignAgentId });
   };
 
-  const handleExportExcel = () => {
-    if (!canExport || !profileRole || clients.length === 0) {
-      if (clients.length === 0) toast.error("No hay clientes para exportar.");
+  const handleExportExcel = async () => {
+    if (!canExport || !profileRole) return;
+    if (totalCount === 0) {
+      toast.error("No hay clientes para exportar.");
       return;
     }
     setIsExporting(true);
     try {
-      downloadClientsExcel(clients, profileRole);
-      toast.success("Archivo Excel generado.");
+      const allClients =
+        isAgent && profileId
+          ? await fetchAllSecureClientsByOwnerIdForExport(
+              profileId,
+              filters,
+              sort,
+              normalizedGlobalSearch,
+            )
+          : await fetchAllSecureClientsForExport(
+              filters,
+              sort,
+              normalizedGlobalSearch,
+            );
+      if (allClients.length === 0) {
+        toast.error("No hay clientes para exportar.");
+        return;
+      }
+      downloadClientsExcel(allClients, profileRole);
+      toast.success(
+        `Archivo Excel generado (${allClients.length} cliente${allClients.length === 1 ? "" : "s"}).`,
+      );
     } catch (err) {
       toast.error(
         err instanceof Error ? err.message : "No se pudo exportar el archivo.",
@@ -620,7 +641,7 @@ function ClientsPage() {
               type="button"
               variant="outline"
               onClick={handleExportExcel}
-              disabled={isLoadingClients || isExporting || clients.length === 0}
+              disabled={isLoadingClients || isExporting || totalCount === 0}
               className="border-border"
             >
               {isExporting ? (
@@ -843,12 +864,12 @@ function ClientsPage() {
                             </Button>
                           </PopoverTrigger>
                           <PopoverContent
-                            className="w-64 p-3 bg-slate-955 border border-slate-800 shadow-md rounded-md [color-scheme:dark]"
+                            className="w-64 p-3 bg-popover border border-border shadow-md rounded-md"
                             align="start"
                             onClick={(e) => e.stopPropagation()}
                           >
                             <div className="space-y-2">
-                              <div className="text-[11px] font-semibold text-slate-200 uppercase tracking-wider">
+                              <div className="text-[11px] font-semibold text-popover-foreground uppercase tracking-wider">
                                 Filtrar {col.label}
                               </div>
                               <ClientTableColumnFilter

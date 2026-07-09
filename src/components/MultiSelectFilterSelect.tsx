@@ -62,7 +62,7 @@ export function MultiSelectFilterSelect({
           role="combobox"
           aria-expanded={open}
           className={cn(
-            "h-7 min-w-0 text-xs px-2 bg-slate-900 border-slate-800 text-slate-300 w-full rounded justify-between font-normal",
+            "h-7 min-w-0 text-xs px-2 bg-surface-elevated border-border text-foreground w-full rounded justify-between font-normal",
             value.length === 0 && "text-muted-foreground",
             className,
           )}

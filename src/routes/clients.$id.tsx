@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
   Building2,
@@ -347,7 +347,7 @@ export function ClientDetail() {
     queryKey: ["secure-client", phone, user?.id],
     queryFn: () => fetchSecureClientByPhone(phone),
     enabled: isProfileReady && phone.length > 0,
-    refetchOnMount: true,
+    placeholderData: keepPreviousData,
     staleTime: 30_000,
   });
 
@@ -362,7 +362,7 @@ export function ClientDetail() {
     queryKey: ["activity-logs", activityPhone, user?.id, profileRole, affiliateName],
     queryFn: () => fetchActivityLogsByPhone(activityPhone),
     enabled: isProfileReady && activityPhone.length > 0,
-    refetchOnMount: true,
+    placeholderData: keepPreviousData,
     staleTime: 15_000,
   });
 
@@ -392,7 +392,7 @@ export function ClientDetail() {
     <ClientPageNavColumn currentPhone={phone} search={search} />
   );
 
-  if (isLoading) {
+  if (isLoading && !client) {
     return (
       <div className="flex h-full min-h-0 overflow-hidden">
         {navColumn}
