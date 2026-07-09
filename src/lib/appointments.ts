@@ -6,6 +6,11 @@ export interface AppointmentClient {
   last_name: string | null;
 }
 
+export interface AppointmentCreator {
+  first_name: string | null;
+  last_name: string | null;
+}
+
 export interface Appointment {
   id: string;
   client_phone: string;
@@ -15,6 +20,7 @@ export interface Appointment {
   created_at: string;
   created_by: string | null;
   clients?: AppointmentClient | AppointmentClient[] | null;
+  creator?: AppointmentCreator | AppointmentCreator[] | null;
 }
 
 export interface CreateAppointmentInput {
@@ -69,7 +75,7 @@ function appointmentSelectForAccess(access?: AppointmentAccess): string {
   const clientEmbed = access && !isUnrestrictedAppointmentRole(access.role) && access.role !== "Affiliate"
     ? "clients!inner"
     : "clients";
-  return `${APPOINTMENT_COLUMNS}, ${clientEmbed} (first_name, last_name)`;
+  return `${APPOINTMENT_COLUMNS}, ${clientEmbed} (first_name, last_name), creator:profiles!created_by (first_name, last_name)`;
 }
 
 function applyAppointmentClientScope<
@@ -102,6 +108,23 @@ export function getAppointmentClientName(appointment: Appointment): string {
     .join(" ")
     .trim();
   return name || appointment.client_phone;
+}
+
+function normalizeCreator(
+  creator: Appointment["creator"],
+): AppointmentCreator | null {
+  if (!creator) return null;
+  if (Array.isArray(creator)) return creator[0] ?? null;
+  return creator;
+}
+
+export function getAppointmentCreatorName(appointment: Appointment): string {
+  const creator = normalizeCreator(appointment.creator);
+  if (!creator) return "";
+  return [creator.first_name, creator.last_name]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
 }
 
 export function formatAppointmentTime(value: string): string {

@@ -15,6 +15,7 @@ import {
   formatAppointmentDateTime,
   formatAppointmentTime,
   getAppointmentClientName,
+  getAppointmentCreatorName,
   type Appointment,
 } from "@/lib/appointments";
 import { clientDetailIdFromPhone } from "@/lib/secure-clients";
@@ -76,6 +77,7 @@ export function AppointmentDetailModal({
 
   const clientName = getAppointmentClientName(appointment);
   const clientPath = `/clients/${clientDetailIdFromPhone(appointment.client_phone)}`;
+  const creatorName = getAppointmentCreatorName(appointment);
 
   return (
     <>
@@ -98,6 +100,13 @@ export function AppointmentDetailModal({
                 <span className="text-muted-foreground">Cliente:</span>
                 <span className="font-medium">{clientName}</span>
               </div>
+              {creatorName && (
+                <div className="flex items-center gap-2 text-sm">
+                  <User className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <span className="text-muted-foreground">Creado por:</span>
+                  <span className="font-medium">{creatorName}</span>
+                </div>
+              )}
               <div className="flex items-center gap-2 text-sm">
                 <CalendarClock className="h-4 w-4 text-muted-foreground shrink-0" />
                 <span className="text-muted-foreground">Hora:</span>

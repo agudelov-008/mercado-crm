@@ -22,6 +22,7 @@ import {
   fetchAppointmentsForMonth,
   formatAppointmentTime,
   getAppointmentClientName,
+  getAppointmentCreatorName,
   getCalendarDays,
   isSameCalendarDay,
   type Appointment,
@@ -328,7 +329,9 @@ export function CalendarPage() {
                 )}
               </div>
             ) : (
-              selectedDayAppointments.map((apt) => (
+              selectedDayAppointments.map((apt) => {
+                const creatorName = getAppointmentCreatorName(apt);
+                return (
                 <button
                   key={apt.id}
                   type="button"
@@ -344,10 +347,16 @@ export function CalendarPage() {
                       <div className="text-xs text-primary/80 mt-1 truncate">
                         {getAppointmentClientName(apt)}
                       </div>
+                      {creatorName && (
+                        <div className="text-xs text-muted-foreground mt-0.5 truncate">
+                          Creado por: {creatorName}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </button>
-              ))
+                );
+              })
             )}
           </div>
         </aside>
