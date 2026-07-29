@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/app-context";
+import { BRAND_NAME } from "@/lib/brand";
 import { cn } from "@/lib/utils";
 
 /** Llave opcional para migrar a TwelveData/AlphaVantage en producción. */
@@ -287,7 +288,7 @@ export function MarketTicker() {
     <div
       className="group relative overflow-hidden border-b border-border bg-surface"
       role="region"
-      aria-label="Ticker financiero Five Elements"
+      aria-label={`Ticker financiero ${BRAND_NAME}`}
     >
       <div className="pointer-events-none absolute right-2 top-1/2 z-10 -translate-y-1/2 rounded-md border border-border bg-background/80 px-2 py-1 text-[10px] text-muted-foreground backdrop-blur">
         <span

@@ -23,7 +23,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: `${BRAND_NAME} — ${BRAND_TAGLINE}` },
-      { name: "description", content: "Premium CRM for wealth advisors — Five Elements." },
+      { name: "description", content: `Premium CRM for wealth advisors — ${BRAND_NAME}.` },
     ],
     links: [
       { rel: "stylesheet", href: appCss },

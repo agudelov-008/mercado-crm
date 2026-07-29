@@ -130,7 +130,7 @@ function LoginPage() {
                     id="email"
                     type="email"
                     name="email"
-                    placeholder="you@fiveelements.com"
+                    placeholder="you@quantcapital.com"
                     required
                     autoComplete="email"
                     className={cn(
