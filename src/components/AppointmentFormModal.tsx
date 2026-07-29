@@ -68,7 +68,7 @@ function ClientAssignedPortfolioField({
         "rounded-md border px-3 py-2.5 text-sm leading-snug",
         isUnassigned
           ? "border-amber-500/45 bg-amber-500/8 text-amber-100/90"
-          : "border-primary/50 bg-primary/8 text-foreground shadow-[0_0_14px_oklch(0.78_0.12_88_/_0.12)]",
+          : "border-primary/50 bg-primary/8 text-foreground shadow-[0_0_14px_oklch(0.78_0.14_200_/_0.12)]",
       )}
     >
       {isUnassigned ? (
